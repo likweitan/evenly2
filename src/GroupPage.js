@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db } from './firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { createReceipt, getGroupReceipts, getGroup, addMemberToGroup, updateMember, deleteMember, deleteReceipt } from './firebaseUtils';
+import { createReceipt, getGroupReceipts, getGroup, addMemberToGroup, updateMember, deleteMember, deleteReceipt, deleteGroup } from './firebaseUtils';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Container, 
@@ -13,7 +13,8 @@ import {
   Form,
   Badge,
   Tabs,
-  Tab
+  Tab,
+  Alert
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -293,6 +294,55 @@ const ShareModal = ({ show, onHide, groupId }) => {
   );
 };
 
+const DeleteGroupModal = ({ show, onHide, onConfirm, groupName }) => {
+  return (
+    <Modal show={show} onHide={onHide} centered>
+      <Modal.Header closeButton>
+        <Modal.Title className="text-danger">Delete Group</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <div className="mb-3">
+          Are you sure you want to delete <strong>{groupName}</strong>?
+        </div>
+        <Alert variant="danger">
+          <i className="bi bi-exclamation-triangle-fill me-2"></i>
+          This action cannot be undone. All receipts and data in this group will be permanently deleted.
+        </Alert>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={onHide}>
+          Cancel
+        </Button>
+        <Button variant="danger" onClick={onConfirm}>
+          Delete Group
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+};
+
+const GroupNotFound = () => {
+  const navigate = useNavigate();
+  
+  return (
+    <Container className="py-5 text-center">
+      <div className="mb-4">
+        <i className="bi bi-exclamation-circle text-danger" style={{ fontSize: '3rem' }}></i>
+      </div>
+      <h2 className="mb-4">Group Not Found</h2>
+      <p className="text-muted mb-4">
+        The group you're looking for doesn't exist or has been deleted.
+      </p>
+      <Button 
+        variant="primary" 
+        onClick={() => navigate('/')}
+      >
+        Return to Home
+      </Button>
+    </Container>
+  );
+};
+
 const GroupPage = () => {
   const navigate = useNavigate();
   const { groupId } = useParams();
@@ -304,11 +354,22 @@ const GroupPage = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('receipts');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      const groupData = await getGroup(groupId);
-      setGroup(groupData);
+      try {
+        const groupData = await getGroup(groupId);
+        if (!groupData) {
+          setError(true);
+          return;
+        }
+        setGroup(groupData);
+      } catch (error) {
+        console.error('Failed to fetch group:', error);
+        setError(true);
+      }
     };
     fetchInitialData();
 
@@ -317,6 +378,8 @@ const GroupPage = () => {
       if (data) {
         setGroup(data);
         fetchReceipts();
+      } else {
+        setError(true);
       }
     });
 
@@ -414,6 +477,20 @@ const GroupPage = () => {
     }
   };
 
+  const handleDeleteGroup = async () => {
+    try {
+      await deleteGroup(groupId);
+      navigate('/');
+    } catch (error) {
+      console.error('Failed to delete group:', error);
+      alert('Failed to delete group');
+    }
+  };
+
+  if (error) {
+    return <GroupNotFound />;
+  }
+
   if (!group) {
     return <LoadingSpinner />;
   }
@@ -424,8 +501,13 @@ const GroupPage = () => {
         <h2 className="mb-0">{group?.name || 'Loading...'}</h2>
         <div className="d-flex gap-2">
           <Button variant="primary" onClick={() => setIsShareModalOpen(true)}>
-            <i className="bi bi-share me-2"></i>
-            Share
+            <i className="bi bi-share"></i>
+          </Button>
+          <Button 
+            variant="outline-danger"
+            onClick={() => setShowDeleteModal(true)}
+          >
+            <i className="bi bi-trash"></i>
           </Button>
         </div>
       </div>
@@ -592,6 +674,13 @@ const GroupPage = () => {
         onSubmit={userModalMode === 'add' ? handleAddUser : handleEditUser}
         initialData={selectedUser}
         mode={userModalMode}
+      />
+
+      <DeleteGroupModal
+        show={showDeleteModal}
+        onHide={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteGroup}
+        groupName={group?.name}
       />
     </Container>
   );

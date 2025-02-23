@@ -6,6 +6,16 @@ import Cookies from 'js-cookie';
 const UserModal = ({ show, onHide, onSignIn }) => {
   const [username, setUsername] = useState('');
 
+  // Load current username when modal opens
+  useEffect(() => {
+    if (show) {
+      const currentUsername = Cookies.get('username');
+      if (currentUsername) {
+        setUsername(currentUsername);
+      }
+    }
+  }, [show]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (username.trim()) {
@@ -13,7 +23,6 @@ const UserModal = ({ show, onHide, onSignIn }) => {
       Cookies.set('username', trimmedUsername, { expires: 365 });
       onSignIn(trimmedUsername);
       onHide();
-      setUsername('');
     }
   };
 

@@ -342,3 +342,21 @@ export const updateReceiptItem = async (receiptId, itemIndex, itemData) => {
     await updateDoc(receiptRef, { items });
   }
 };
+
+export const deleteGroup = async (groupId) => {
+  // First get all receipts for this group
+  const groupDoc = await getDoc(doc(db, 'groups', groupId));
+  const groupData = groupDoc.data();
+  
+  // Delete all receipts
+  if (groupData.receipts) {
+    await Promise.all(
+      groupData.receipts.map(receiptId => 
+        deleteDoc(doc(db, 'receipts', receiptId))
+      )
+    );
+  }
+  
+  // Finally delete the group
+  await deleteDoc(doc(db, 'groups', groupId));
+};
