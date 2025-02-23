@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { db } from './firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { 
@@ -11,6 +11,19 @@ import {
   updateReceiptTaxes,
   updateReceiptItem
 } from './firebaseUtils';
+import { 
+  Container, 
+  Card, 
+  Button, 
+  Table, 
+  Modal, 
+  Form, 
+  Badge,
+  Row,
+  Col,
+  Breadcrumb
+} from 'react-bootstrap';
+import 'bootstrap/dist/css/bootstrap.min.css';
 
 const styles = {
   container: {
@@ -375,7 +388,7 @@ const UserSelect = ({ value, onChange, options, label }) => {
         ))}
         {options.length === 0 && (
           <div style={{ color: '#666', padding: '8px', gridColumn: '1 / -1' }}>
-            暂无可选用户
+            No users available
           </div>
         )}
       </div>
@@ -383,12 +396,12 @@ const UserSelect = ({ value, onChange, options, label }) => {
   );
 };
 
-const AddItemModal = ({ isOpen, onClose, onSubmit, users }) => {
+const AddItemModal = ({ show, onHide, onSubmit, users }) => {
   const [item, setItem] = useState({
     name: '',
     price: '',
     quantity: '',
-    userIds: [] // Changed from userId to userIds array
+    userIds: []
   });
 
   const handleChange = (e) => {
@@ -405,38 +418,30 @@ const AddItemModal = ({ isOpen, onClose, onSubmit, users }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const submitData = {
-      name: item.name,
-      price: item.price,
-      quantity: item.quantity,
-      ...(item.userIds.length > 0 && { userIds: item.userIds })
-    };
-    onSubmit(submitData);
+    onSubmit(item);
     setItem({ name: '', price: '', quantity: '', userIds: [] });
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div style={styles.modal}>
-      <div style={styles.modalContent}>
-        <h2>添加新项目</h2>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label>名称:</label>
-            <input
-              style={styles.input}
+    <Modal show={show} onHide={onHide} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Add New Item</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form onSubmit={handleSubmit}>
+          <Form.Group className="mb-3">
+            <Form.Label>Name</Form.Label>
+            <Form.Control
               type="text"
               name="name"
               value={item.name}
               onChange={handleChange}
               required
             />
-          </div>
-          <div style={styles.formGroup}>
-            <label>价格:</label>
-            <input
-              style={styles.input}
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Price</Form.Label>
+            <Form.Control
               type="number"
               name="price"
               value={item.price}
@@ -445,11 +450,10 @@ const AddItemModal = ({ isOpen, onClose, onSubmit, users }) => {
               min="0"
               required
             />
-          </div>
-          <div style={styles.formGroup}>
-            <label>数量:</label>
-            <input
-              style={styles.input}
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Quantity</Form.Label>
+            <Form.Control
               type="number"
               name="quantity"
               value={item.quantity}
@@ -457,26 +461,26 @@ const AddItemModal = ({ isOpen, onClose, onSubmit, users }) => {
               min="1"
               required
             />
-          </div>
-          <div style={styles.formGroup}>
+          </Form.Group>
+          <Form.Group className="mb-3">
             <UserSelect
-              label="选择用户 (可选)"
+              label="Select Users (Optional)"
               value={item.userIds}
               onChange={handleUsersChange}
               options={users}
             />
+          </Form.Group>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="secondary" onClick={onHide}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit">
+              Add
+            </Button>
           </div>
-          <div style={styles.modalButtons}>
-            <button type="button" onClick={onClose} style={{...styles.button, backgroundColor: '#999'}}>
-              取消
-            </button>
-            <button type="submit" style={styles.button}>
-              添加
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
   );
 };
 
@@ -503,11 +507,11 @@ const ChangeUserModal = ({ isOpen, onClose, onSubmit, users, itemId, currentUser
   return (
     <div style={styles.modal}>
       <div style={styles.modalContent}>
-        <h2>更改用户</h2>
+        <h2>Change Users</h2>
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.formGroup}>
             <UserSelect
-              label="选择用户 (可选)"
+              label="Select Users (Optional)"
               value={userIds}
               onChange={(newUserIds) => {
                 console.log('Selected users:', newUserIds);
@@ -522,10 +526,10 @@ const ChangeUserModal = ({ isOpen, onClose, onSubmit, users, itemId, currentUser
               onClick={onClose} 
               style={{...styles.button, backgroundColor: '#999'}}
             >
-              取消
+              Cancel
             </button>
             <button type="submit" style={styles.button}>
-              保存
+              Save
             </button>
           </div>
         </form>
@@ -541,7 +545,7 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
   return (
     <div style={styles.summaryHeader}>
       <div style={styles.summaryValue}>
-        <span style={styles.summaryLabel}>小计</span>
+        <span style={styles.summaryLabel}>Subtotal</span>
         <span style={styles.summaryAmount}>
           RM {subtotal.toFixed(2)}
         </span>
@@ -556,14 +560,14 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
       )}
       {receipt.serviceCharge && (
         <div style={styles.summaryValue}>
-          <span style={styles.summaryLabel}>服务费 ({receipt.serviceCharge}%)</span>
+          <span style={styles.summaryLabel}>Service Charge ({receipt.serviceCharge}%)</span>
           <span style={styles.summaryAmount}>
             RM {taxes.serviceCharge.toFixed(2)}
           </span>
         </div>
       )}
       <div style={styles.summaryValue}>
-        <span style={styles.summaryLabel}>总计</span>
+        <span style={styles.summaryLabel}>Total</span>
         <span style={{...styles.summaryAmount, ...styles.totalAmount}}>
           RM {taxes.total.toFixed(2)}
         </span>
@@ -612,7 +616,7 @@ const UserSummary = ({ users, items, receipt }) => {
         style={styles.accordionHeader}
         onClick={() => setIsOpen(!isOpen)}
       >
-        <span>用户消费明细</span>
+        <span>User Details</span>
         <span>{isOpen ? '▼' : '▶'}</span>
       </div>
       {isOpen && (
@@ -635,7 +639,7 @@ const UserSummary = ({ users, items, receipt }) => {
                       <div style={styles.userItemDetails}>
                         <span>{item.name}</span>
                         <span style={styles.userItemShare}>
-                          {item.userIds.length > 1 ? `(${item.userIds.length} 人分)` : ''}
+                          {item.userIds.length > 1 ? `(Split ${item.userIds.length} ways)` : ''}
                         </span>
                       </div>
                       <span>RM {item.perPersonCost.toFixed(2)}</span>
@@ -651,7 +655,7 @@ const UserSummary = ({ users, items, receipt }) => {
                       )}
                       {receipt.serviceCharge && (
                         <div style={styles.taxItem}>
-                          <span>服务费 ({receipt.serviceCharge}%)</span>
+                          <span>Service Charge ({receipt.serviceCharge}%)</span>
                           <span>RM {(total * receipt.serviceCharge / 100).toFixed(2)}</span>
                         </div>
                       )}
@@ -691,7 +695,7 @@ const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   return (
     <div style={styles.modal}>
       <div style={styles.modalContent}>
-        <h2>设置税费</h2>
+        <h2>Tax Settings</h2>
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.formGroup}>
             <label>SST (%):</label>
@@ -700,20 +704,20 @@ const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
               type="number"
               value={taxes.sst}
               onChange={(e) => setTaxes(prev => ({ ...prev, sst: e.target.value }))}
-              placeholder="输入 SST 百分比"
+              placeholder="Enter SST percentage"
               step="0.1"
               min="0"
               max="100"
             />
           </div>
           <div style={styles.formGroup}>
-            <label>服务费 (%):</label>
+            <label>Service Charge (%):</label>
             <input
               style={styles.input}
               type="number"
               value={taxes.serviceCharge}
               onChange={(e) => setTaxes(prev => ({ ...prev, serviceCharge: e.target.value }))}
-              placeholder="输入服务费百分比"
+              placeholder="Enter service charge percentage"
               step="0.1"
               min="0"
               max="100"
@@ -721,10 +725,10 @@ const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
           </div>
           <div style={styles.modalButtons}>
             <button type="button" onClick={onClose} style={{...styles.button, backgroundColor: '#999'}}>
-              取消
+              Cancel
             </button>
             <button type="submit" style={styles.button}>
-              保存
+              Save
             </button>
           </div>
         </form>
@@ -775,8 +779,8 @@ const ReceiptPage = () => {
       await addItemToReceipt(receiptId, itemData);
       setIsModalOpen(false);
     } catch (error) {
-      console.error('添加项目失败:', error);
-      alert('添加项目失败');
+      console.error('Failed to add item:', error);
+      alert('Failed to add item');
     }
   };
 
@@ -788,8 +792,8 @@ const ReceiptPage = () => {
       setSelectedItemId(null);
       setSelectedUserIds([]);
     } catch (error) {
-      console.error('更改用户失败:', error);
-      alert('更改用户失败');
+      console.error('Failed to change users:', error);
+      alert('Failed to change users');
     }
   };
 
@@ -800,12 +804,12 @@ const ReceiptPage = () => {
   };
 
   const handleDeleteItem = async (itemIndex) => {
-    if (window.confirm('确定要删除这个项目吗？')) {
+    if (window.confirm('Are you sure you want to delete this item?')) {
       try {
         await deleteReceiptItem(receiptId, itemIndex);
       } catch (error) {
-        console.error('删除项目失败:', error);
-        alert('删除项目失败');
+        console.error('Failed to delete item:', error);
+        alert('Failed to delete item');
       }
     }
   };
@@ -838,8 +842,8 @@ const ReceiptPage = () => {
       await updateReceiptTaxes(receiptId, taxData);
       setIsTaxModalOpen(false);
     } catch (error) {
-      console.error('更新税费失败:', error);
-      alert('更新税费失败');
+      console.error('Failed to update taxes:', error);
+      alert('Failed to update taxes');
     }
   };
 
@@ -860,8 +864,8 @@ const ReceiptPage = () => {
       setIsEditModalOpen(false);
       setSelectedItem(null);
     } catch (error) {
-      console.error('更新项目失败:', error);
-      alert('更新项目失败');
+      console.error('Failed to update item:', error);
+      alert('Failed to update item');
     }
   };
 
@@ -870,7 +874,7 @@ const ReceiptPage = () => {
   }
 
   const getUserNames = (userIds = []) => {
-    if (!userIds || userIds.length === 0) return '未分配';
+    if (!userIds || userIds.length === 0) return 'Unassigned';
     return userIds
       .map(userId => {
         const user = group.members.find(m => m.id === userId);
@@ -881,110 +885,149 @@ const ReceiptPage = () => {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
+    <Container className="py-4">
+      <Breadcrumb className="mb-4">
+        <Breadcrumb.Item 
+          linkAs={Link} 
+          linkProps={{ to: `/group/${groupId}` }}
+        >
+          {group?.name || 'Loading...'}
+        </Breadcrumb.Item>
+        <Breadcrumb.Item active>
+          {receipt?.name || 'Loading...'}
+        </Breadcrumb.Item>
+      </Breadcrumb>
+
+      <div className="d-flex justify-content-between align-items-start mb-4">
         <div>
-          <h1 style={{ marginBottom: '8px' }}>收据: {receipt.name}</h1>
-          <div style={styles.dateText}>创建时间: {formatDate(receipt.createdAt)}</div>
+          <h2 className="mb-2">{receipt.name}</h2>
+          <div className="text-muted">
+            Created: {formatDate(receipt.createdAt)}
+          </div>
         </div>
-        <button
-          style={{...styles.button, backgroundColor: '#2196F3'}}
+        <Button 
+          variant="primary"
           onClick={() => setIsTaxModalOpen(true)}
         >
-          税费设置
-        </button>
+          <i className="bi bi-gear-fill me-2"></i>
+          Tax Settings
+        </Button>
       </div>
 
-      <div style={styles.tableContainer}>
-        <table style={styles.table}>
-          <thead>
+      <Table hover responsive>
+        <thead>
+          <tr>
+            <th>Item Name</th>
+            <th>Price</th>
+            <th>Quantity</th>
+            <th>Subtotal</th>
+            <th>Users</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {!receipt.items || receipt.items.length === 0 ? (
             <tr>
-              <th style={styles.th}>名称</th>
-              <th style={styles.th}>单价</th>
-              <th style={styles.th}>数量</th>
-              <th style={styles.th}>小计</th>
-              <th style={styles.th}>用户</th>
-              <th style={styles.th}>操作</th>
+              <td colSpan="6" className="text-center py-4 text-muted">
+                No items yet
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {!receipt.items || receipt.items.length === 0 ? (
-              <tr>
-                <td colSpan="6" style={styles.td}>暂无项目</td>
+          ) : (
+            receipt.items.map((item, index) => (
+              <tr 
+                key={index}
+                onClick={(e) => handleItemClick(item, index, e)}
+                style={{ cursor: 'pointer' }}
+              >
+                <td>{item.name}</td>
+                <td>RM {item.price.toFixed(2)}</td>
+                <td>{item.quantity}</td>
+                <td>
+                  <Badge bg="info">
+                    RM {(item.price * item.quantity).toFixed(2)}
+                  </Badge>
+                </td>
+                <td>{getUserNames(item.userIds)}</td>
+                <td>
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteItem(index);
+                    }}
+                  >
+                    <i className="bi bi-trash"></i>
+                  </Button>
+                </td>
               </tr>
-            ) : (
-              receipt.items.map((item, index) => (
-                <tr 
-                  key={index}
-                  onClick={(e) => handleItemClick(item, index, e)}
-                  style={{ 
-                    cursor: 'pointer',
-                    ':hover': { backgroundColor: '#f5f5f5' }
-                  }}
-                >
-                  <td style={styles.td}>{item.name}</td>
-                  <td style={styles.td}>RM {item.price.toFixed(2)}</td>
-                  <td style={styles.td}>{item.quantity}</td>
-                  <td style={styles.td}>RM {(item.price * item.quantity).toFixed(2)}</td>
-                  <td style={styles.td}>{getUserNames(item.userIds)}</td>
-                  <td style={styles.td}>
-                    <div style={styles.actionButtons}>
-                      <button
-                        onClick={() => handleDeleteItem(index)}
-                        style={{...styles.actionButton, backgroundColor: '#f44336'}}
-                        title="删除"
-                      >
-                        <svg 
-                          width="20" 
-                          height="20" 
-                          viewBox="0 0 24 24" 
-                          fill="none" 
-                          stroke="white" 
-                          strokeWidth="2" 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round"
-                        >
-                          <path d="M3 6h18"></path>
-                          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"></path>
-                          <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            ))
+          )}
+        </tbody>
+      </Table>
 
       {receipt.items && receipt.items.length > 0 && (
         <>
-          <ReceiptSummary
-            receipt={receipt}
-            items={receipt.items}
-            calculateSubtotal={calculateSubtotal}
-            calculateTaxes={calculateTaxes}
-          />
-          <UserSummary 
-            users={group.members || []}
-            items={receipt.items}
-            receipt={receipt}
-          />
+          <Card className="shadow-sm mb-4">
+            <Card.Body>
+              <Row className="text-end">
+                <Col>
+                  <div className="d-flex justify-content-end gap-5">
+                    <div>
+                      <div className="text-muted mb-1">Subtotal</div>
+                      <h4>RM {calculateSubtotal(receipt.items).toFixed(2)}</h4>
+                    </div>
+                    {receipt.sst && (
+                      <div>
+                        <div className="text-muted mb-1">SST ({receipt.sst}%)</div>
+                        <h4>RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).sst.toFixed(2)}</h4>
+                      </div>
+                    )}
+                    {receipt.serviceCharge && (
+                      <div>
+                        <div className="text-muted mb-1">Service Charge ({receipt.serviceCharge}%)</div>
+                        <h4>RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge.toFixed(2)}</h4>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-muted mb-1">Total</div>
+                      <h4 className="text-primary">
+                        RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).total.toFixed(2)}
+                      </h4>
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+            </Card.Body>
+          </Card>
+
+          <Card className="shadow-sm">
+            <Card.Body>
+              <div className="d-flex justify-content-between align-items-center mb-4">
+                <h3 className="mb-0">User Summary</h3>
+              </div>
+              <UserSummary 
+                users={group.members || []}
+                items={receipt.items}
+                receipt={receipt}
+              />
+            </Card.Body>
+          </Card>
         </>
       )}
 
-      <button
-        style={styles.floatingButton}
+      <Button
+        className="position-fixed bottom-0 end-0 m-4"
+        style={{ width: '60px', height: '60px', borderRadius: '30px' }}
+        variant="success"
         onClick={() => setIsModalOpen(true)}
-        title="添加项目"
       >
-        +
-      </button>
+        <i className="bi bi-plus-lg fs-4"></i>
+      </Button>
 
       <AddItemModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        show={isModalOpen}
+        onHide={() => setIsModalOpen(false)}
         onSubmit={handleAddItem}
         users={group.members || []}
       />
@@ -1013,8 +1056,8 @@ const ReceiptPage = () => {
       />
 
       <EditItemModal
-        isOpen={isEditModalOpen}
-        onClose={() => {
+        show={isEditModalOpen}
+        onHide={() => {
           setIsEditModalOpen(false);
           setSelectedItem(null);
         }}
@@ -1022,11 +1065,11 @@ const ReceiptPage = () => {
         initialData={selectedItem}
         users={group.members || []}
       />
-    </div>
+    </Container>
   );
 };
 
-const EditItemModal = ({ isOpen, onClose, onSubmit, initialData, users }) => {
+const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
   const [item, setItem] = useState({
     name: '',
     price: '',
@@ -1063,33 +1106,31 @@ const EditItemModal = ({ isOpen, onClose, onSubmit, initialData, users }) => {
     onSubmit(item);
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div style={styles.modal}>
-      <div style={styles.modalContent}>
-        <h2>编辑项目</h2>
+    <Modal show={show} onHide={onHide} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Edit Item</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
         {initialData?.timestamp && (
-          <div style={styles.modalDate}>
-            最后更新: {formatDate(initialData.timestamp)}
+          <div className="text-muted mb-3">
+            Last Updated: {formatDate(initialData.timestamp)}
           </div>
         )}
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label>名称:</label>
-            <input
-              style={styles.input}
+        <Form onSubmit={handleSubmit}>
+          <Form.Group className="mb-3">
+            <Form.Label>Name</Form.Label>
+            <Form.Control
               type="text"
               name="name"
               value={item.name}
               onChange={handleChange}
               required
             />
-          </div>
-          <div style={styles.formGroup}>
-            <label>价格:</label>
-            <input
-              style={styles.input}
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Price</Form.Label>
+            <Form.Control
               type="number"
               name="price"
               value={item.price}
@@ -1098,11 +1139,10 @@ const EditItemModal = ({ isOpen, onClose, onSubmit, initialData, users }) => {
               min="0"
               required
             />
-          </div>
-          <div style={styles.formGroup}>
-            <label>数量:</label>
-            <input
-              style={styles.input}
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Quantity</Form.Label>
+            <Form.Control
               type="number"
               name="quantity"
               value={item.quantity}
@@ -1110,26 +1150,26 @@ const EditItemModal = ({ isOpen, onClose, onSubmit, initialData, users }) => {
               min="1"
               required
             />
-          </div>
-          <div style={styles.formGroup}>
+          </Form.Group>
+          <Form.Group className="mb-3">
             <UserSelect
-              label="选择用户 (可选)"
+              label="Select Users (Optional)"
               value={item.userIds}
               onChange={handleUsersChange}
               options={users}
             />
+          </Form.Group>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="secondary" onClick={onHide}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit">
+              Save
+            </Button>
           </div>
-          <div style={styles.modalButtons}>
-            <button type="button" onClick={onClose} style={{...styles.button, backgroundColor: '#999'}}>
-              取消
-            </button>
-            <button type="submit" style={styles.button}>
-              保存
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
   );
 };
 
