@@ -198,6 +198,7 @@ export const addItemToReceipt = async (receiptId, itemData) => {
     price,
     quantity,
     totalAmount: price * quantity,
+    createdAt: new Date().toISOString(),
   };
 
   // Only add userIds if there are any selected
@@ -331,7 +332,8 @@ export const updateReceiptItem = async (receiptId, itemIndex, itemData) => {
   updatedItems[itemIndex] = {
     ...updatedItems[itemIndex],
     ...itemData,
-    totalAmount: itemData.price * itemData.quantity
+    totalAmount: itemData.price * itemData.quantity,
+    updatedAt: new Date().toISOString()
   };
 
   await updateDoc(doc(db, 'receipts', receiptId), {

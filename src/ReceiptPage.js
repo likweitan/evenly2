@@ -21,7 +21,7 @@ const styles = {
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: '20px',
   },
   table: {
@@ -305,6 +305,16 @@ const styles = {
     padding: '15px',
     backgroundColor: 'white',
   },
+  dateText: {
+    color: '#666',
+    fontSize: '14px',
+  },
+  modalDate: {
+    color: '#666',
+    fontSize: '14px',
+    marginBottom: '20px',
+    marginTop: '-10px',
+  },
 };
 
 // Replace the existing MultiSelect component with this new design
@@ -562,107 +572,6 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
   );
 };
 
-const EditItemModal = ({ isOpen, onClose, onSubmit, initialData, users }) => {
-  const [item, setItem] = useState({
-    name: '',
-    price: '',
-    quantity: '',
-    userIds: []
-  });
-
-  useEffect(() => {
-    if (initialData) {
-      setItem({
-        name: initialData.name,
-        price: initialData.price,
-        quantity: initialData.quantity,
-        userIds: initialData.userIds || []
-      });
-    }
-  }, [initialData]);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setItem(prev => ({
-      ...prev,
-      [name]: name === 'name' ? value : Number(value)
-    }));
-  };
-
-  const handleUsersChange = (userIds) => {
-    setItem(prev => ({ ...prev, userIds }));
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit(item);
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div style={styles.modal}>
-      <div style={styles.modalContent}>
-        <h2>编辑项目</h2>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label>名称:</label>
-            <input
-              style={styles.input}
-              type="text"
-              name="name"
-              value={item.name}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          <div style={styles.formGroup}>
-            <label>价格:</label>
-            <input
-              style={styles.input}
-              type="number"
-              name="price"
-              value={item.price}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
-          </div>
-          <div style={styles.formGroup}>
-            <label>数量:</label>
-            <input
-              style={styles.input}
-              type="number"
-              name="quantity"
-              value={item.quantity}
-              onChange={handleChange}
-              min="1"
-              required
-            />
-          </div>
-          <div style={styles.formGroup}>
-            <UserSelect
-              label="选择用户 (可选)"
-              value={item.userIds}
-              onChange={handleUsersChange}
-              options={users}
-            />
-          </div>
-          <div style={styles.modalButtons}>
-            <button type="button" onClick={onClose} style={{...styles.button, backgroundColor: '#999'}}>
-              取消
-            </button>
-            <button type="submit" style={styles.button}>
-              保存
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
 const UserSummary = ({ users, items, receipt }) => {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -756,6 +665,83 @@ const UserSummary = ({ users, items, receipt }) => {
       )}
     </div>
   );
+};
+
+const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
+  const [taxes, setTaxes] = useState({
+    sst: '',
+    serviceCharge: ''
+  });
+
+  useEffect(() => {
+    setTaxes(initialData);
+  }, [initialData]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const submitData = {
+      sst: taxes.sst ? Number(taxes.sst) : null,
+      serviceCharge: taxes.serviceCharge ? Number(taxes.serviceCharge) : null
+    };
+    onSubmit(submitData);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div style={styles.modal}>
+      <div style={styles.modalContent}>
+        <h2>设置税费</h2>
+        <form onSubmit={handleSubmit} style={styles.form}>
+          <div style={styles.formGroup}>
+            <label>SST (%):</label>
+            <input
+              style={styles.input}
+              type="number"
+              value={taxes.sst}
+              onChange={(e) => setTaxes(prev => ({ ...prev, sst: e.target.value }))}
+              placeholder="输入 SST 百分比"
+              step="0.1"
+              min="0"
+              max="100"
+            />
+          </div>
+          <div style={styles.formGroup}>
+            <label>服务费 (%):</label>
+            <input
+              style={styles.input}
+              type="number"
+              value={taxes.serviceCharge}
+              onChange={(e) => setTaxes(prev => ({ ...prev, serviceCharge: e.target.value }))}
+              placeholder="输入服务费百分比"
+              step="0.1"
+              min="0"
+              max="100"
+            />
+          </div>
+          <div style={styles.modalButtons}>
+            <button type="button" onClick={onClose} style={{...styles.button, backgroundColor: '#999'}}>
+              取消
+            </button>
+            <button type="submit" style={styles.button}>
+              保存
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const formatDate = (dateString) => {
+  const date = new Date(dateString);
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 const ReceiptPage = () => {
@@ -857,6 +843,17 @@ const ReceiptPage = () => {
     }
   };
 
+  const handleItemClick = (item, index, e) => {
+    if (e.target.closest('button')) return;
+    
+    setSelectedItem({ 
+      ...item, 
+      index,
+      timestamp: item.updatedAt || item.createdAt // Use updatedAt if available, fall back to createdAt
+    });
+    setIsEditModalOpen(true);
+  };
+
   const handleEditItem = async (itemData) => {
     try {
       await updateReceiptItem(receiptId, selectedItem.index, itemData);
@@ -866,13 +863,6 @@ const ReceiptPage = () => {
       console.error('更新项目失败:', error);
       alert('更新项目失败');
     }
-  };
-
-  const handleItemClick = (item, index, e) => {
-    if (e.target.closest('button')) return;
-    
-    setSelectedItem({ ...item, index });
-    setIsEditModalOpen(true);
   };
 
   if (!receipt || !group) {
@@ -893,7 +883,10 @@ const ReceiptPage = () => {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1>收据: {receipt.name}</h1>
+        <div>
+          <h1 style={{ marginBottom: '8px' }}>收据: {receipt.name}</h1>
+          <div style={styles.dateText}>创建时间: {formatDate(receipt.createdAt)}</div>
+        </div>
         <button
           style={{...styles.button, backgroundColor: '#2196F3'}}
           onClick={() => setIsTaxModalOpen(true)}
@@ -1033,23 +1026,41 @@ const ReceiptPage = () => {
   );
 };
 
-const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
-  const [taxes, setTaxes] = useState({
-    sst: '',
-    serviceCharge: ''
+const EditItemModal = ({ isOpen, onClose, onSubmit, initialData, users }) => {
+  const [item, setItem] = useState({
+    name: '',
+    price: '',
+    quantity: '',
+    userIds: []
   });
 
   useEffect(() => {
-    setTaxes(initialData);
+    if (initialData) {
+      setItem({
+        name: initialData.name,
+        price: initialData.price,
+        quantity: initialData.quantity,
+        userIds: initialData.userIds || [],
+        timestamp: initialData.timestamp || initialData.createdAt // Use timestamp if available, fall back to createdAt
+      });
+    }
   }, [initialData]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setItem(prev => ({
+      ...prev,
+      [name]: name === 'name' ? value : Number(value)
+    }));
+  };
+
+  const handleUsersChange = (userIds) => {
+    setItem(prev => ({ ...prev, userIds }));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const submitData = {
-      sst: taxes.sst ? Number(taxes.sst) : null,
-      serviceCharge: taxes.serviceCharge ? Number(taxes.serviceCharge) : null
-    };
-    onSubmit(submitData);
+    onSubmit(item);
   };
 
   if (!isOpen) return null;
@@ -1057,32 +1068,55 @@ const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   return (
     <div style={styles.modal}>
       <div style={styles.modalContent}>
-        <h2>设置税费</h2>
+        <h2>编辑项目</h2>
+        {initialData?.timestamp && (
+          <div style={styles.modalDate}>
+            最后更新: {formatDate(initialData.timestamp)}
+          </div>
+        )}
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.formGroup}>
-            <label>SST (%):</label>
+            <label>名称:</label>
             <input
               style={styles.input}
-              type="number"
-              value={taxes.sst}
-              onChange={(e) => setTaxes(prev => ({ ...prev, sst: e.target.value }))}
-              placeholder="输入 SST 百分比"
-              step="0.1"
-              min="0"
-              max="100"
+              type="text"
+              name="name"
+              value={item.name}
+              onChange={handleChange}
+              required
             />
           </div>
           <div style={styles.formGroup}>
-            <label>服务费 (%):</label>
+            <label>价格:</label>
             <input
               style={styles.input}
               type="number"
-              value={taxes.serviceCharge}
-              onChange={(e) => setTaxes(prev => ({ ...prev, serviceCharge: e.target.value }))}
-              placeholder="输入服务费百分比"
-              step="0.1"
+              name="price"
+              value={item.price}
+              onChange={handleChange}
+              step="0.01"
               min="0"
-              max="100"
+              required
+            />
+          </div>
+          <div style={styles.formGroup}>
+            <label>数量:</label>
+            <input
+              style={styles.input}
+              type="number"
+              name="quantity"
+              value={item.quantity}
+              onChange={handleChange}
+              min="1"
+              required
+            />
+          </div>
+          <div style={styles.formGroup}>
+            <UserSelect
+              label="选择用户 (可选)"
+              value={item.userIds}
+              onChange={handleUsersChange}
+              options={users}
             />
           </div>
           <div style={styles.modalButtons}>
