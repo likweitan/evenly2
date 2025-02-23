@@ -16,6 +16,7 @@ import {
   Tab
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import LoadingSpinner from './components/LoadingSpinner';
 
 const styles = {
   container: {
@@ -414,7 +415,7 @@ const GroupPage = () => {
   };
 
   if (!group) {
-    return <div>Loading group data...</div>;
+    return <LoadingSpinner />;
   }
 
   return (

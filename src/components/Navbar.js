@@ -1,11 +1,81 @@
-import React from 'react';
-import { Navbar, Container, Nav } from 'react-bootstrap';
+import React, { useState, useEffect } from 'react';
+import { Navbar, Container, Nav, Button, Modal, Form } from 'react-bootstrap';
 import { Link, useLocation } from 'react-router-dom';
+import Cookies from 'js-cookie';
 
-const AppNavbar = () => {
+const UserModal = ({ show, onHide, onSignIn }) => {
+  const [username, setUsername] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (username.trim()) {
+      const trimmedUsername = username.trim();
+      Cookies.set('username', trimmedUsername, { expires: 365 });
+      onSignIn(trimmedUsername);
+      onHide();
+      setUsername('');
+    }
+  };
+
+  return (
+    <Modal 
+      show={show} 
+      onHide={onHide} 
+      centered
+      backdrop="static"
+      keyboard={false}
+    >
+      <Modal.Header>
+        <Modal.Title>Sign In</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form onSubmit={handleSubmit}>
+          <Form.Group className="mb-3">
+            <Form.Label>Username</Form.Label>
+            <Form.Control
+              type="text"
+              placeholder="Enter your preferred username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoFocus
+            />
+          </Form.Group>
+          <div className="d-flex justify-content-end">
+            <Button variant="primary" type="submit">
+              Save
+            </Button>
+          </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
+  );
+};
+
+const AppNavbar = ({ showUserModal, setShowUserModal }) => {
   const location = useLocation();
   const pathSegments = location.pathname.split('/').filter(Boolean);
+  const [username, setUsername] = useState('');
+
+  useEffect(() => {
+    const savedUsername = Cookies.get('username');
+    if (savedUsername) {
+      setUsername(savedUsername);
+    }
+  }, []);
+
+  const handleSignOut = () => {
+    Cookies.remove('username');
+    setUsername('');
+    if (location.pathname !== '/') {
+      setShowUserModal(true);
+    }
+  };
   
+  const handleSignIn = (newUsername) => {
+    setUsername(newUsername);
+  };
+
   const renderBreadcrumb = () => {
     if (pathSegments.length === 0) return 'Home';
     
@@ -30,12 +100,24 @@ const AppNavbar = () => {
             </Nav.Link> */}
           </Nav>
           <Nav>
-            <Nav.Item className="text-light d-flex align-items-center">
-              {renderBreadcrumb()}
-            </Nav.Item>
+            {username && (
+              <div 
+                className="d-flex align-items-center text-light" 
+                style={{ cursor: 'pointer' }}
+                onClick={handleSignOut}
+              >
+                <span>Signed in as: {username}</span>
+              </div>
+            )}
           </Nav>
         </Navbar.Collapse>
       </Container>
+
+      <UserModal
+        show={showUserModal}
+        onHide={() => setShowUserModal(false)}
+        onSignIn={handleSignIn}
+      />
     </Navbar>
   );
 };

@@ -24,6 +24,7 @@ import {
   Breadcrumb
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import LoadingSpinner from './components/LoadingSpinner';
 
 const styles = {
   container: {
@@ -870,7 +871,7 @@ const ReceiptPage = () => {
   };
 
   if (!receipt || !group) {
-    return <div>Loading data...</div>;
+    return <LoadingSpinner />;
   }
 
   const getUserNames = (userIds = []) => {
