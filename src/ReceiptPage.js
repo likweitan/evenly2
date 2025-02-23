@@ -9,7 +9,8 @@ import {
   updateItemUsers, 
   deleteReceiptItem,
   updateReceiptTaxes,
-  updateReceiptItem
+  updateReceiptItem,
+  updateReceiptSettings
 } from './firebaseUtils';
 import { 
   Container, 
@@ -21,7 +22,9 @@ import {
   Badge,
   Row,
   Col,
-  Breadcrumb
+  Breadcrumb,
+  Tab,
+  Tabs
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -579,8 +582,6 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
 };
 
 const UserSummary = ({ users, items, receipt }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
   const calculateUserTotal = (userId) => {
     let total = 0;
     items.forEach(item => {
@@ -613,136 +614,160 @@ const UserSummary = ({ users, items, receipt }) => {
   };
 
   return (
-    <div style={styles.accordion}>
-      <div 
-        style={styles.accordionHeader}
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <span>User Details</span>
-        <span>{isOpen ? '▼' : '▶'}</span>
-      </div>
-      {isOpen && (
-        <div style={styles.accordionContent}>
-          {users.map(user => {
-            const userItems = getUserItems(user.id);
-            const total = calculateUserTotal(user.id);
-            
-            if (userItems.length === 0) return null;
+    <>
+      {users.map(user => {
+        const userItems = getUserItems(user.id);
+        const total = calculateUserTotal(user.id);
+        
+        if (userItems.length === 0) return null;
 
-            return (
-              <div key={user.id} style={styles.userSummaryCard}>
-                <div style={styles.userSummaryHeader}>
-                  <span style={styles.userName}>{user.name}</span>
-                  <span style={styles.userTotal}>RM {total.toFixed(2)}</span>
-                </div>
-                <div style={styles.userItemList}>
-                  {userItems.map((item, index) => (
-                    <div key={index} style={styles.userItem}>
-                      <div style={styles.userItemDetails}>
-                        <span>{item.name}</span>
-                        <span style={styles.userItemShare}>
-                          {item.userIds.length > 1 ? `(Split ${item.userIds.length} ways)` : ''}
-                        </span>
-                      </div>
-                      <span>RM {item.perPersonCost.toFixed(2)}</span>
-                    </div>
-                  ))}
-                  {(receipt.sst || receipt.serviceCharge) && total > 0 && (
-                    <div style={styles.taxDetails}>
-                      {receipt.sst && (
-                        <div style={styles.taxItem}>
-                          <span>SST ({receipt.sst}%)</span>
-                          <span>RM {(total * receipt.sst / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {receipt.serviceCharge && (
-                        <div style={styles.taxItem}>
-                          <span>Service Charge ({receipt.serviceCharge}%)</span>
-                          <span>RM {(total * receipt.serviceCharge / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+        return (
+          <div key={user.id} className="mb-4">
+            <div className="bg-white rounded shadow-sm">
+              <div className="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+                <span className="fw-bold">{user.name}</span>
+                <span className="text-primary fw-bold">RM {total.toFixed(2)}</span>
               </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              <div className="p-3">
+                {userItems.map((item, index) => (
+                  <div key={index} className="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <span>{item.name}</span>
+                      {item.userIds.length > 1 && (
+                        <small className="text-muted ms-2">
+                          (Split by {item.userIds.length} persons)
+                        </small>
+                      )}
+                    </div>
+                    <span>RM {item.perPersonCost.toFixed(2)}</span>
+                  </div>
+                ))}
+                {(receipt.sst || receipt.serviceCharge) && total > 0 && (
+                  <div className="mt-3 pt-3 border-top">
+                    {receipt.sst && (
+                      <div className="d-flex justify-content-between text-muted small mb-1">
+                        <span>SST ({receipt.sst}%)</span>
+                        <span>RM {(total * receipt.sst / 100).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {receipt.serviceCharge && (
+                      <div className="d-flex justify-content-between text-muted small">
+                        <span>Service Charge ({receipt.serviceCharge}%)</span>
+                        <span>RM {(total * receipt.serviceCharge / 100).toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 };
 
-const TaxSettingsModal = ({ show, onHide, onSubmit, initialData }) => {
-  const [taxes, setTaxes] = useState({
+const ReceiptSettingsModal = ({ show, onHide, onSubmit, initialData, users }) => {
+  const [settings, setSettings] = useState({
+    name: '',
+    paidBy: '',
     sst: '',
     serviceCharge: ''
   });
 
   useEffect(() => {
     if (initialData) {
-      setTaxes({
+      setSettings({
+        name: initialData.name || '',
+        paidBy: initialData.paidBy || '',
         sst: initialData.sst || '',
         serviceCharge: initialData.serviceCharge || ''
       });
     }
   }, [initialData]);
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(settings);
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setTaxes(prev => ({
+    setSettings(prev => ({
       ...prev,
       [name]: value
     }));
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit({
-      sst: taxes.sst ? Number(taxes.sst) : null,
-      serviceCharge: taxes.serviceCharge ? Number(taxes.serviceCharge) : null
-    });
-  };
-
   return (
     <Modal show={show} onHide={onHide} centered>
       <Modal.Header closeButton>
-        <Modal.Title>Tax Settings</Modal.Title>
+        <Modal.Title>Receipt Settings</Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Form onSubmit={handleSubmit}>
+          <Form.Group className="mb-3">
+            <Form.Label>Receipt Name</Form.Label>
+            <Form.Control
+              type="text"
+              name="name"
+              value={settings.name}
+              onChange={handleChange}
+              required
+            />
+          </Form.Group>
+
+          <Form.Group className="mb-3">
+            <Form.Label>Paid By</Form.Label>
+            <Form.Select
+              name="paidBy"
+              value={settings.paidBy}
+              onChange={handleChange}
+              required
+            >
+              <option value="">Select user</option>
+              {users?.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </Form.Select>
+          </Form.Group>
+
+          <hr className="my-4" />
+
           <Form.Group className="mb-3">
             <Form.Label>SST (%)</Form.Label>
             <Form.Control
               type="number"
               name="sst"
-              value={taxes.sst}
+              value={settings.sst}
               onChange={handleChange}
-              placeholder="Enter SST percentage"
+              step="0.1"
               min="0"
               max="100"
-              step="0.1"
             />
           </Form.Group>
+
           <Form.Group className="mb-3">
             <Form.Label>Service Charge (%)</Form.Label>
             <Form.Control
               type="number"
               name="serviceCharge"
-              value={taxes.serviceCharge}
+              value={settings.serviceCharge}
               onChange={handleChange}
-              placeholder="Enter service charge percentage"
+              step="0.1"
               min="0"
               max="100"
-              step="0.1"
             />
           </Form.Group>
+
           <div className="d-flex justify-content-end gap-2">
             <Button variant="secondary" onClick={onHide}>
               Cancel
             </Button>
             <Button variant="primary" type="submit">
-              Save
+              Save Changes
             </Button>
           </div>
         </Form>
@@ -773,6 +798,7 @@ const ReceiptPage = () => {
   const [isTaxModalOpen, setIsTaxModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [activeTab, setActiveTab] = useState('items');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -886,13 +912,34 @@ const ReceiptPage = () => {
         updatedAt: new Date().toISOString(),
         updatedBy: username,
       };
-      console.log('Saving item with data:', updatedItem); // Debug log
-      await updateReceiptItem(receiptId, selectedItem.index, updatedItem);
+
+      if (itemData.isDelete) {
+        // Delete the item
+        await deleteReceiptItem(receiptId, itemData.index);
+      } else if (itemData.isCopy) {
+        // Add as new item
+        await addItemToReceipt(receiptId, updatedItem);
+      } else {
+        // Update existing item
+        await updateReceiptItem(receiptId, selectedItem.index, updatedItem);
+      }
+
       setIsEditModalOpen(false);
       setSelectedItem(null);
     } catch (error) {
       console.error('Failed to update item:', error);
       alert('Failed to update item');
+    }
+  };
+
+  const handleSettingsUpdate = async (settingsData) => {
+    try {
+      // Update receipt settings in Firestore
+      await updateReceiptSettings(receiptId, settingsData);
+      setIsTaxModalOpen(false);
+    } catch (error) {
+      console.error('Failed to update receipt settings:', error);
+      alert('Failed to update receipt settings');
     }
   };
 
@@ -942,115 +989,112 @@ const ReceiptPage = () => {
           <Button 
             variant="primary"
             onClick={() => setIsTaxModalOpen(true)}
+            title="Receipt Settings"
           >
             <i className="bi bi-gear-fill"></i>
           </Button>
         </div>
       </div>
 
-      <Table hover responsive>
-        <thead>
-          <tr>
-            <th>Item Name</th>
-            <th>Price</th>
-            <th>Quantity</th>
-            <th>Users</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {!receipt.items || receipt.items.length === 0 ? (
-            <tr>
-              <td colSpan="6" className="text-center py-4 text-muted">
-                No items yet
-              </td>
-            </tr>
-          ) : (
-            receipt.items.map((item, index) => (
-              <tr 
-                key={index}
-                onClick={(e) => handleItemClick(item, index, e)}
-                style={{ cursor: 'pointer' }}
-              >
-                <td>{item.name}</td>
-                <td>RM {item.price.toFixed(2)}</td>
-                <td>{item.quantity}</td>
-                <td>{getUserNames(item.userIds)}</td>
-                <td>
-                  <Button
-                    variant="outline-danger"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteItem(index);
-                    }}
-                  >
-                    <i className="bi bi-trash"></i>
-                  </Button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+      <Tabs
+        activeKey={activeTab}
+        onSelect={(k) => setActiveTab(k)}
+        className="mb-4"
+      >
+        <Tab eventKey="items" title="Items">
+          <div className="pt-3">
+            <Table hover responsive>
+              <thead>
+                <tr>
+                  <th>Item Name</th>
+                  <th className="text-end">Price</th>
+                  <th className="text-end">Qty</th>
+                  <th className="text-end">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!receipt.items || receipt.items.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className="text-center py-4 text-muted">
+                      No items yet
+                    </td>
+                  </tr>
+                ) : (
+                  receipt.items.map((item, index) => (
+                    <tr 
+                      key={index}
+                      onClick={(e) => handleItemClick(item, index, e)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{item.name}</td>
+                      <td className="text-end">
+                        <Badge bg="info">RM {item.price.toFixed(2)}</Badge>
+                      </td>
+                      <td className="text-end">{item.quantity}</td>
+                      <td className="text-end">
+                        RM {(item.price * item.quantity).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </Table>
 
-      {receipt.items && receipt.items.length > 0 && (
-        <>
-          <div className="mb-4">
-              <div className="d-flex flex-column gap-2">
-                {/* Subtotal Row */}
-                <div className="d-flex justify-content-between align-items-center">
-                  <span className="text-muted">Subtotal</span>
-                  <span>RM {calculateSubtotal(receipt.items).toFixed(2)}</span>
-                </div>
-
-                {/* SST Row - only show if exists */}
-                {receipt.sst && (
+            {receipt.items && receipt.items.length > 0 && (
+              <div className="mb-4">
+                <div className="d-flex flex-column gap-2">
+                  {/* Subtotal Row */}
                   <div className="d-flex justify-content-between align-items-center">
-                    <span className="text-muted">SST ({receipt.sst}%)</span>
-                    <span>
-                      RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).sst.toFixed(2)}
+                    <span className="text-muted">Subtotal</span>
+                    <span>RM {calculateSubtotal(receipt.items).toFixed(2)}</span>
+                  </div>
+
+                  {/* SST Row - only show if exists */}
+                  {receipt.sst && (
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="text-muted">SST ({receipt.sst}%)</span>
+                      <span>
+                        RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).sst.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Service Charge Row - only show if exists */}
+                  {receipt.serviceCharge && (
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="text-muted">Service Charge ({receipt.serviceCharge}%)</span>
+                      <span>
+                        RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  <hr className="my-2" />
+
+                  {/* Total Row */}
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span className="fw-bold">Total</span>
+                    <span className="fw-bold text-primary fs-5">
+                      RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).total.toFixed(2)}
                     </span>
                   </div>
-                )}
-
-                {/* Service Charge Row - only show if exists */}
-                {receipt.serviceCharge && (
-                  <div className="d-flex justify-content-between align-items-center">
-                    <span className="text-muted">Service Charge ({receipt.serviceCharge}%)</span>
-                    <span>
-                      RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge.toFixed(2)}
-                    </span>
-                  </div>
-                )}
-
-                {/* Divider */}
-                <hr className="my-2" />
-
-                {/* Total Row */}
-                <div className="d-flex justify-content-between align-items-center">
-                  <span className="fw-bold">Total</span>
-                  <span className="fw-bold text-primary fs-5">
-                    RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).total.toFixed(2)}
-                  </span>
                 </div>
               </div>
-              </div>
+            )}
+          </div>
+        </Tab>
 
-          <Card className="shadow-sm">
-            <Card.Body>
-              <div className="d-flex justify-content-between align-items-center mb-4">
-                <h3 className="mb-0">User Summary</h3>
-              </div>
-              <UserSummary 
-                users={group.members || []}
-                items={receipt.items}
-                receipt={receipt}
-              />
-            </Card.Body>
-          </Card>
-        </>
-      )}
+        <Tab eventKey="summary" title="Summary">
+          <div className="pt-3">
+            <UserSummary 
+              users={group.members || []}
+              items={receipt.items}
+              receipt={receipt}
+            />
+          </div>
+        </Tab>
+      </Tabs>
 
       <AddItemModal
         show={isModalOpen}
@@ -1072,14 +1116,17 @@ const ReceiptPage = () => {
         currentUserIds={selectedUserIds}
       />
 
-      <TaxSettingsModal
+      <ReceiptSettingsModal
         show={isTaxModalOpen}
         onHide={() => setIsTaxModalOpen(false)}
-        onSubmit={handleTaxUpdate}
+        onSubmit={handleSettingsUpdate}
         initialData={{
+          name: receipt.name,
+          paidBy: receipt.paidBy,
           sst: receipt.sst || '',
           serviceCharge: receipt.serviceCharge || ''
         }}
+        users={group.members || []}
       />
 
       <EditItemModal
@@ -1140,6 +1187,26 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     });
   };
 
+  const handleCopy = () => {
+    // Create a new item with the same data
+    const username = Cookies.get('username');
+    onSubmit({
+      ...item,
+      updatedBy: username,
+      isCopy: true  // Add flag to indicate this is a copy
+    });
+  };
+
+  const handleDelete = () => {
+    if (window.confirm('Are you sure you want to delete this item?')) {
+      onSubmit({
+        ...item,
+        isDelete: true,  // Add flag to indicate this is a deletion
+        index: initialData.index
+      });
+    }
+  };
+
   return (
     <Modal show={show} onHide={onHide} centered>
       <Modal.Header closeButton>
@@ -1197,11 +1264,28 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
             />
           </Form.Group>
           <div className="d-flex justify-content-end gap-2">
-            <Button variant="secondary" onClick={onHide}>
-              Cancel
+            <Button 
+              variant="outline-danger" 
+              onClick={handleDelete}
+              type="button"
+              title="Delete"
+            >
+              <i className="bi bi-trash"></i>
             </Button>
-            <Button variant="primary" type="submit">
-              Save
+            <Button 
+              variant="outline-primary" 
+              onClick={handleCopy}
+              type="button"
+              title="Copy"
+            >
+              <i className="bi bi-files"></i>
+            </Button>
+            <Button 
+              variant="primary" 
+              type="submit"
+              title="Save"
+            >
+              <i className="bi bi-check-lg"></i>
             </Button>
           </div>
         </Form>

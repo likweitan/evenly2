@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db } from './firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { createReceipt, getGroupReceipts, getGroup, addMemberToGroup, updateMember, deleteMember, deleteReceipt, deleteGroup } from './firebaseUtils';
+import { createReceipt, getGroupReceipts, getGroup, addMemberToGroup, updateMember, deleteMember, deleteReceipt, deleteGroup, addItemToReceipt, updateReceiptTaxes } from './firebaseUtils';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Container, 
@@ -343,6 +343,154 @@ const GroupNotFound = () => {
   );
 };
 
+const UploadReceiptModal = ({ show, onHide, onSubmit }) => {
+  const [file, setFile] = useState(null);
+  const [jsonText, setJsonText] = useState('');
+  const [error, setError] = useState('');
+  const [uploadMethod, setUploadMethod] = useState('file'); // 'file' or 'paste'
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === 'application/json') {
+      setFile(file);
+      setError('');
+    } else {
+      setError('Please select a valid JSON file');
+      setFile(null);
+    }
+  };
+
+  const handleJsonTextChange = (e) => {
+    setJsonText(e.target.value);
+    setError('');
+  };
+
+  const parseAndSubmitJson = (jsonData) => {
+    try {
+      const data = JSON.parse(jsonData);
+      
+      // Get SST and service charge directly from the percentage fields
+      const sst = data["SST(%)"];
+      const serviceCharge = data["service_charge(%)"];
+
+      onSubmit({
+        name: data.store_name,
+        items: data.items,
+        sst: sst ? parseFloat(sst).toFixed(1) : null,  // Use direct percentage values
+        serviceCharge: serviceCharge ? parseFloat(serviceCharge).toFixed(1) : null
+      });
+    } catch (error) {
+      console.error('Parse error:', error);
+      setError('Invalid JSON format');
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (uploadMethod === 'file' && file) {
+      const reader = new FileReader();
+      reader.onload = (e) => parseAndSubmitJson(e.target.result);
+      reader.onerror = () => setError('Failed to read file');
+      reader.readAsText(file);
+    } else if (uploadMethod === 'paste' && jsonText.trim()) {
+      parseAndSubmitJson(jsonText);
+    } else {
+      setError('Please provide JSON data');
+    }
+  };
+
+  const handleModalHide = () => {
+    setFile(null);
+    setJsonText('');
+    setError('');
+    setUploadMethod('file');
+    onHide();
+  };
+
+  return (
+    <Modal show={show} onHide={handleModalHide} centered size="lg">
+      <Modal.Header closeButton>
+        <Modal.Title>Upload Receipt</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form onSubmit={handleSubmit}>
+          <div className="mb-3">
+            <Form.Group>
+              <div className="d-flex gap-3 mb-3">
+                <Form.Check
+                  type="radio"
+                  name="uploadMethod"
+                  id="fileUpload"
+                  label="Upload JSON File"
+                  checked={uploadMethod === 'file'}
+                  onChange={() => setUploadMethod('file')}
+                />
+                <Form.Check
+                  type="radio"
+                  name="uploadMethod"
+                  id="jsonPaste"
+                  label="Paste JSON"
+                  checked={uploadMethod === 'paste'}
+                  onChange={() => setUploadMethod('paste')}
+                />
+              </div>
+            </Form.Group>
+
+            {uploadMethod === 'file' ? (
+              <Form.Group>
+                <Form.Control
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileChange}
+                  className="mb-3"
+                />
+                {file && (
+                  <div className="text-success">
+                    <i className="bi bi-check-circle me-2"></i>
+                    File selected: {file.name}
+                  </div>
+                )}
+              </Form.Group>
+            ) : (
+              <Form.Group>
+                <Form.Control
+                  as="textarea"
+                  rows={10}
+                  placeholder="Paste your JSON here..."
+                  value={jsonText}
+                  onChange={handleJsonTextChange}
+                  className="font-monospace"
+                />
+              </Form.Group>
+            )}
+
+            {error && (
+              <Alert variant="danger" className="mt-3">
+                <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                {error}
+              </Alert>
+            )}
+          </div>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="secondary" onClick={handleModalHide}>
+              Cancel
+            </Button>
+            <Button 
+              variant="primary" 
+              type="submit"
+              disabled={uploadMethod === 'file' ? !file : !jsonText.trim()}
+            >
+              Upload
+            </Button>
+          </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
+  );
+};
+
 const GroupPage = () => {
   const navigate = useNavigate();
   const { groupId } = useParams();
@@ -356,6 +504,7 @@ const GroupPage = () => {
   const [activeTab, setActiveTab] = useState('receipts');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [error, setError] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -393,7 +542,10 @@ const GroupPage = () => {
 
   const handleAddReceipt = async (receiptData) => {
     try {
-      await createReceipt(groupId, receiptData);
+      await createReceipt(groupId, {
+        name: receiptData.name,
+        paidBy: receiptData.paidBy
+      });
       setIsModalOpen(false);
     } catch (error) {
       console.error('Failed to add receipt:', error);
@@ -487,6 +639,40 @@ const GroupPage = () => {
     }
   };
 
+  const handleUploadReceipt = async (receiptData) => {
+    try {
+      // Create receipt and get the receiptId
+      const receiptId = await createReceipt(groupId, {
+        name: receiptData.name,
+        paidBy: group.members[0]?.id // Default to first member
+      });
+
+      // Add all items from the JSON
+      for (const item of receiptData.items) {
+        await addItemToReceipt(receiptId, {
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity
+        });
+      }
+
+      // Update tax settings
+      if (receiptData.sst || receiptData.serviceCharge) {
+        await updateReceiptTaxes(receiptId, {
+          sst: receiptData.sst,
+          serviceCharge: receiptData.serviceCharge
+        });
+      }
+
+      // Fetch updated receipts
+      await fetchReceipts();
+      setShowUploadModal(false);
+    } catch (error) {
+      console.error('Failed to upload receipt:', error);
+      alert('Failed to upload receipt');
+    }
+  };
+
   if (error) {
     return <GroupNotFound />;
   }
@@ -519,9 +705,14 @@ const GroupPage = () => {
       >
         <Tab eventKey="receipts" title="Receipts">
           <div className="d-flex justify-content-end mb-3">
-            <Button variant="success" onClick={() => setIsModalOpen(true)}>
-              <i className="bi bi-plus-lg"></i>
-            </Button>
+            <div className="d-flex justify-content-end mb-3 gap-2">
+              <Button variant="primary" onClick={() => setShowUploadModal(true)}>
+                <i className="bi bi-upload"></i>
+              </Button>
+              <Button variant="success" onClick={() => setIsModalOpen(true)}>
+                <i className="bi bi-plus-lg"></i>
+              </Button>
+            </div>
           </div>
           <Table hover responsive className="bg-white rounded shadow-sm">
             <thead>
@@ -636,7 +827,10 @@ const GroupPage = () => {
         <Modal.Body>
           <Form onSubmit={(e) => {
             e.preventDefault();
-            handleAddReceipt({ name: e.target.receiptName.value });
+            handleAddReceipt({
+              name: e.target.receiptName.value,
+              paidBy: e.target.paidBy.value
+            });
           }}>
             <Form.Group className="mb-3">
               <Form.Label>Receipt Name</Form.Label>
@@ -647,12 +841,26 @@ const GroupPage = () => {
                 required
               />
             </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Paid By</Form.Label>
+              <Form.Select
+                name="paidBy"
+                required
+              >
+                <option value="">Select user</option>
+                {group.members?.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </Form.Select>
+            </Form.Group>
             <div className="d-flex justify-content-end gap-2">
               <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-                取消
+                Cancel
               </Button>
               <Button variant="primary" type="submit">
-                添加
+                Create
               </Button>
             </div>
           </Form>
@@ -681,6 +889,12 @@ const GroupPage = () => {
         onHide={() => setShowDeleteModal(false)}
         onConfirm={handleDeleteGroup}
         groupName={group?.name}
+      />
+
+      <UploadReceiptModal
+        show={showUploadModal}
+        onHide={() => setShowUploadModal(false)}
+        onSubmit={handleUploadReceipt}
       />
     </Container>
   );

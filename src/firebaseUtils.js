@@ -27,6 +27,7 @@ export const createGroup = async (groupName) => {
  * @param {string} receiptData.name - 收据名称
  * @param {number} receiptData.price - 价格
  * @param {number} receiptData.quantity - 数量
+ * @param {string} receiptData.paidBy - 支付者
  * @returns {string} - 收据ID
  */
 export const createReceipt = async (groupId, receiptData) => {
@@ -35,6 +36,7 @@ export const createReceipt = async (groupId, receiptData) => {
     id: receiptId,
     groupId: groupId,
     name: receiptData.name,
+    paidBy: receiptData.paidBy,
     items: [],
     createdAt: new Date().toISOString(),
   });
@@ -192,24 +194,29 @@ export const updateItemUsers = async (receiptId, itemIndex, userIds) => {
  * @param {string[]} itemData.userIds - 项目关联的用户ID数组
  */
 export const addItemToReceipt = async (receiptId, itemData) => {
-  const { name, price, quantity, userIds } = itemData;
+  const { name, price, quantity } = itemData;
+  
+  // Create item object with all required fields
   const itemToAdd = {
-    name,
-    price,
-    quantity,
-    totalAmount: price * quantity,
+    name: name || '',
+    price: Number(price) || 0,
+    quantity: Number(quantity) || 0,
+    totalAmount: (Number(price) || 0) * (Number(quantity) || 0),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    updatedBy: itemData.updatedBy
+    updatedBy: itemData.updatedBy || null
   };
 
-  // Only add userIds if there are any selected
-  if (userIds && userIds.length > 0) {
-    itemToAdd.userIds = userIds;
-  }
+  // Get current items array
+  const receiptDoc = await getDoc(doc(db, 'receipts', receiptId));
+  const currentItems = receiptDoc.data().items || [];
+  
+  // Add new item to array
+  const updatedItems = [...currentItems, itemToAdd];
 
+  // Update the document with new items array
   await updateDoc(doc(db, 'receipts', receiptId), {
-    items: arrayUnion(itemToAdd)
+    items: updatedItems
   });
 };
 
@@ -359,4 +366,14 @@ export const deleteGroup = async (groupId) => {
   
   // Finally delete the group
   await deleteDoc(doc(db, 'groups', groupId));
+};
+
+export const updateReceiptSettings = async (receiptId, settingsData) => {
+  await updateDoc(doc(db, 'receipts', receiptId), {
+    name: settingsData.name,
+    paidBy: settingsData.paidBy,
+    sst: settingsData.sst || null,
+    serviceCharge: settingsData.serviceCharge || null,
+    updatedAt: new Date().toISOString()
+  });
 };
