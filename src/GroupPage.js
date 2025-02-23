@@ -544,7 +544,7 @@ const GroupPage = () => {
     try {
       await createReceipt(groupId, {
         name: receiptData.name,
-        paidBy: receiptData.paidBy
+        paidTo: receiptData.paidTo
       });
       setIsModalOpen(false);
     } catch (error) {
@@ -644,7 +644,7 @@ const GroupPage = () => {
       // Create receipt and get the receiptId
       const receiptId = await createReceipt(groupId, {
         name: receiptData.name,
-        paidBy: group.members[0]?.id // Default to first member
+        paidTo: group.members[0]?.id // Default to first member
       });
 
       // Add all items from the JSON
@@ -829,7 +829,7 @@ const GroupPage = () => {
             e.preventDefault();
             handleAddReceipt({
               name: e.target.receiptName.value,
-              paidBy: e.target.paidBy.value
+              paidTo: e.target.paidTo.value
             });
           }}>
             <Form.Group className="mb-3">
@@ -842,9 +842,9 @@ const GroupPage = () => {
               />
             </Form.Group>
             <Form.Group className="mb-3">
-              <Form.Label>Paid By</Form.Label>
+              <Form.Label>Paid To</Form.Label>
               <Form.Select
-                name="paidBy"
+                name="paidTo"
                 required
               >
                 <option value="">Select user</option>

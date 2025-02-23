@@ -28,7 +28,6 @@ import {
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
-import Cookies from 'js-cookie';
 
 const styles = {
   container: {
@@ -583,6 +582,11 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
 
 const UserSummary = ({ users, items, receipt }) => {
   const calculateUserTotal = (userId) => {
+    // If this is the receipt owner (paidTo), they don't owe anything
+    if (userId === receipt.paidTo) {
+      return 0;
+    }
+
     let total = 0;
     items.forEach(item => {
       if (item.userIds && item.userIds.includes(userId)) {
@@ -613,20 +617,58 @@ const UserSummary = ({ users, items, receipt }) => {
     }));
   };
 
+  const calculateUserPayments = (userId) => {
+    // If this is the receipt owner (paidTo), they paid the total amount
+    if (userId === receipt.paidTo) {
+      const totalAmount = items.reduce((sum, item) => {
+        return sum + (item.price * item.quantity);
+      }, 0);
+
+      let total = totalAmount;
+      if (receipt.sst) {
+        total += totalAmount * (receipt.sst / 100);
+      }
+      if (receipt.serviceCharge) {
+        total += totalAmount * (receipt.serviceCharge / 100);
+      }
+      return total;
+    }
+
+    let paid = 0;
+    items.forEach(item => {
+      if (item.paidByIds && item.paidByIds.includes(userId)) {
+        const perPersonPaid = (item.price * item.quantity) / item.paidByIds.length;
+        paid += perPersonPaid;
+      }
+    });
+    return paid;
+  };
+
   return (
     <>
       {users.map(user => {
         const userItems = getUserItems(user.id);
         const total = calculateUserTotal(user.id);
+        const paid = calculateUserPayments(user.id);
         
-        if (userItems.length === 0) return null;
+        // Show the owner even if they have no items
+        const shouldShow = userItems.length > 0 || user.id === receipt.paidTo;
+        if (!shouldShow) return null;
 
         return (
           <div key={user.id} className="mb-4">
             <div className="bg-white rounded shadow-sm">
               <div className="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-                <span className="fw-bold">{user.name}</span>
-                <span className="text-primary fw-bold">RM {total.toFixed(2)}</span>
+                <span className="fw-bold">
+                  {user.name}
+                  {user.id === receipt.paidTo && (
+                    <Badge bg="primary" className="ms-2">Owner</Badge>
+                  )}
+                </span>
+                <div className="text-end">
+                  <div className="text-muted small">Paid: RM {paid.toFixed(2)}</div>
+                  <div className="text-primary fw-bold">Owed: RM {total.toFixed(2)}</div>
+                </div>
               </div>
               <div className="p-3">
                 {userItems.map((item, index) => (
@@ -670,7 +712,7 @@ const UserSummary = ({ users, items, receipt }) => {
 const ReceiptSettingsModal = ({ show, onHide, onSubmit, initialData, users }) => {
   const [settings, setSettings] = useState({
     name: '',
-    paidBy: '',
+    paidTo: '',
     sst: '',
     serviceCharge: ''
   });
@@ -679,7 +721,7 @@ const ReceiptSettingsModal = ({ show, onHide, onSubmit, initialData, users }) =>
     if (initialData) {
       setSettings({
         name: initialData.name || '',
-        paidBy: initialData.paidBy || '',
+        paidTo: initialData.paidTo || '',
         sst: initialData.sst || '',
         serviceCharge: initialData.serviceCharge || ''
       });
@@ -718,10 +760,10 @@ const ReceiptSettingsModal = ({ show, onHide, onSubmit, initialData, users }) =>
           </Form.Group>
 
           <Form.Group className="mb-3">
-            <Form.Label>Paid By</Form.Label>
+            <Form.Label>Paid To</Form.Label>
             <Form.Select
-              name="paidBy"
-              value={settings.paidBy}
+              name="paidTo"
+              value={settings.paidTo}
               onChange={handleChange}
               required
             >
@@ -816,11 +858,7 @@ const ReceiptPage = () => {
 
   const handleAddItem = async (itemData) => {
     try {
-      const username = Cookies.get('username');
-      await addItemToReceipt(receiptId, {
-        ...itemData,
-        updatedBy: username
-      });
+      await addItemToReceipt(receiptId, itemData);
       setIsModalOpen(false);
     } catch (error) {
       console.error('Failed to add item:', error);
@@ -899,28 +937,29 @@ const ReceiptPage = () => {
       ...item, 
       index,
       timestamp: item.updatedAt || item.createdAt,
-      updatedBy: item.updatedBy
     });
     setIsEditModalOpen(true);
   };
 
   const handleEditItem = async (itemData) => {
     try {
-      const username = Cookies.get('username');
+      // Create a clean item object with all required fields
       const updatedItem = {
-        ...itemData,
+        name: itemData.name,
+        price: Number(itemData.price),
+        quantity: Number(itemData.quantity),
+        userIds: itemData.userIds || [],
+        paidByIds: itemData.paidByIds || [],
         updatedAt: new Date().toISOString(),
-        updatedBy: username,
       };
 
       if (itemData.isDelete) {
-        // Delete the item
         await deleteReceiptItem(receiptId, itemData.index);
       } else if (itemData.isCopy) {
-        // Add as new item
+        // For copy, use addItemToReceipt with clean data
         await addItemToReceipt(receiptId, updatedItem);
       } else {
-        // Update existing item
+        // For update, use updateReceiptItem with clean data
         await updateReceiptItem(receiptId, selectedItem.index, updatedItem);
       }
 
@@ -934,7 +973,6 @@ const ReceiptPage = () => {
 
   const handleSettingsUpdate = async (settingsData) => {
     try {
-      // Update receipt settings in Firestore
       await updateReceiptSettings(receiptId, settingsData);
       setIsTaxModalOpen(false);
     } catch (error) {
@@ -1020,22 +1058,49 @@ const ReceiptPage = () => {
                     </td>
                   </tr>
                 ) : (
-                  receipt.items.map((item, index) => (
-                    <tr 
-                      key={index}
-                      onClick={(e) => handleItemClick(item, index, e)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td>{item.name}</td>
-                      <td className="text-end">
-                        <Badge bg="info">RM {item.price.toFixed(2)}</Badge>
-                      </td>
-                      <td className="text-end">{item.quantity}</td>
-                      <td className="text-end">
-                        RM {(item.price * item.quantity).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))
+                  receipt.items.map((item, index) => {
+                    // Get consumed by IDs
+                    const consumedByIds = item.userIds || [];
+                    
+                    // Get paid by IDs, excluding the receipt owner
+                    const paidByIds = item.paidByIds || [];
+                    
+                    // Filter out receipt owner from both arrays for comparison
+                    const consumersExcludingOwner = consumedByIds.filter(id => id !== receipt.paidTo);
+                    const payersExcludingOwner = paidByIds.filter(id => id !== receipt.paidTo);
+                    
+                    // Check if arrays match after excluding owner
+                    const isPaid = consumersExcludingOwner.length > 0 && 
+                                   payersExcludingOwner.length > 0 && 
+                                   consumersExcludingOwner.length === payersExcludingOwner.length && 
+                                   consumersExcludingOwner.every(id => payersExcludingOwner.includes(id));
+
+                    return (
+                      <tr 
+                        key={index}
+                        onClick={(e) => handleItemClick(item, index, e)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>
+                          <div className="d-flex align-items-center gap-2">
+                            {item.name}
+                            {isPaid && (
+                              <Badge bg="success" className="ms-2">
+                                PAID
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="text-end">
+                          <Badge bg="info">RM {item.price.toFixed(2)}</Badge>
+                        </td>
+                        <td className="text-end">{item.quantity}</td>
+                        <td className="text-end">
+                          RM {(item.price * item.quantity).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </Table>
@@ -1122,7 +1187,7 @@ const ReceiptPage = () => {
         onSubmit={handleSettingsUpdate}
         initialData={{
           name: receipt.name,
-          paidBy: receipt.paidBy,
+          paidTo: receipt.paidTo,
           sst: receipt.sst || '',
           serviceCharge: receipt.serviceCharge || ''
         }}
@@ -1149,17 +1214,18 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     price: '',
     quantity: '',
     userIds: [],
+    paidByIds: [],
     updatedBy: ''
   });
 
   useEffect(() => {
     if (initialData) {
-      console.log('Initial data in modal:', initialData); // Debug log
       setItem({
         name: initialData.name,
         price: initialData.price,
         quantity: initialData.quantity,
         userIds: initialData.userIds || [],
+        paidByIds: initialData.paidByIds || [],
         timestamp: initialData.timestamp || initialData.createdAt,
         updatedBy: initialData.updatedBy
       });
@@ -1178,22 +1244,21 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     setItem(prev => ({ ...prev, userIds }));
   };
 
+  const handlePaidByChange = (paidByIds) => {
+    setItem(prev => ({ ...prev, paidByIds }));
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    const username = Cookies.get('username');
     onSubmit({
       ...item,
-      updatedBy: username
     });
   };
 
   const handleCopy = () => {
-    // Create a new item with the same data
-    const username = Cookies.get('username');
     onSubmit({
       ...item,
-      updatedBy: username,
-      isCopy: true  // Add flag to indicate this is a copy
+      isCopy: true
     });
   };
 
@@ -1216,9 +1281,6 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
         {initialData?.timestamp && (
           <div className="text-muted mb-3">
             Last Updated: {formatDate(initialData.timestamp)}
-            {initialData.updatedBy && (
-              <span> by {initialData.updatedBy}</span>
-            )}
           </div>
         )}
         <Form onSubmit={handleSubmit}>
@@ -1257,9 +1319,17 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
           </Form.Group>
           <Form.Group className="mb-3">
             <UserSelect
-              label="Select Users (Optional)"
+              label="Consumed By (Optional)"
               value={item.userIds}
               onChange={handleUsersChange}
+              options={users}
+            />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <UserSelect
+              label="Paid By (Optional)"
+              value={item.paidByIds}
+              onChange={handlePaidByChange}
               options={users}
             />
           </Form.Group>

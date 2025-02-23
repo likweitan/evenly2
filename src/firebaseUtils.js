@@ -36,7 +36,7 @@ export const createReceipt = async (groupId, receiptData) => {
     id: receiptId,
     groupId: groupId,
     name: receiptData.name,
-    paidBy: receiptData.paidBy,
+    paidTo: receiptData.paidTo,
     items: [],
     createdAt: new Date().toISOString(),
   });
@@ -194,27 +194,23 @@ export const updateItemUsers = async (receiptId, itemIndex, userIds) => {
  * @param {string[]} itemData.userIds - 项目关联的用户ID数组
  */
 export const addItemToReceipt = async (receiptId, itemData) => {
-  const { name, price, quantity } = itemData;
+  const { name, price, quantity, paidByIds } = itemData;
   
-  // Create item object with all required fields
   const itemToAdd = {
     name: name || '',
     price: Number(price) || 0,
     quantity: Number(quantity) || 0,
     totalAmount: (Number(price) || 0) * (Number(quantity) || 0),
+    paidByIds: paidByIds || [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    updatedBy: itemData.updatedBy || null
   };
 
-  // Get current items array
   const receiptDoc = await getDoc(doc(db, 'receipts', receiptId));
   const currentItems = receiptDoc.data().items || [];
   
-  // Add new item to array
   const updatedItems = [...currentItems, itemToAdd];
 
-  // Update the document with new items array
   await updateDoc(doc(db, 'receipts', receiptId), {
     items: updatedItems
   });
@@ -343,7 +339,6 @@ export const updateReceiptItem = async (receiptId, itemIndex, itemData) => {
       ...items[itemIndex],
       ...itemData,
       updatedAt: new Date().toISOString(),
-      updatedBy: itemData.updatedBy
     };
 
     await updateDoc(receiptRef, { items });
@@ -371,7 +366,7 @@ export const deleteGroup = async (groupId) => {
 export const updateReceiptSettings = async (receiptId, settingsData) => {
   await updateDoc(doc(db, 'receipts', receiptId), {
     name: settingsData.name,
-    paidBy: settingsData.paidBy,
+    paidTo: settingsData.paidTo,
     sst: settingsData.sst || null,
     serviceCharge: settingsData.serviceCharge || null,
     updatedAt: new Date().toISOString()

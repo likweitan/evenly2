@@ -61,72 +61,15 @@ const UserModal = ({ show, onHide, onSignIn }) => {
   );
 };
 
-const AppNavbar = ({ showUserModal, setShowUserModal }) => {
-  const location = useLocation();
-  const pathSegments = location.pathname.split('/').filter(Boolean);
-  const [username, setUsername] = useState('');
-
-  useEffect(() => {
-    const savedUsername = Cookies.get('username');
-    if (savedUsername) {
-      setUsername(savedUsername);
-    }
-  }, []);
-
-  const handleSignOut = () => {
-    Cookies.remove('username');
-    setUsername('');
-    if (location.pathname !== '/') {
-      setShowUserModal(true);
-    }
-  };
-  
-  const handleSignIn = (newUsername) => {
-    setUsername(newUsername);
-  };
-
-  const renderBreadcrumb = () => {
-    if (pathSegments.length === 0) return 'Home';
-    
-    if (pathSegments[0] === 'group') {
-      if (pathSegments.length === 1) return 'Home';
-      if (pathSegments.length === 2) return 'Group';
-      if (pathSegments.length === 4 && pathSegments[2] === 'receipt') return 'Receipt';
-    }
-    
-    return 'Home';
-  };
-
+const AppNavbar = () => {
   return (
-    <Navbar bg="dark" variant="dark" expand="lg" className="mb-4">
+    <Navbar bg="light" data-bs-theme="light">
       <Container>
         <Navbar.Brand as={Link} to="/">Evenly</Navbar.Brand>
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
         <Navbar.Collapse id="basic-navbar-nav">
-          <Nav className="me-auto">
-            {/* <Nav.Link as={Link} to="/" active={location.pathname === '/'}>
-              Home
-            </Nav.Link> */}
-          </Nav>
-          <Nav>
-            {username && (
-              <div 
-                className="d-flex align-items-center text-light" 
-                style={{ cursor: 'pointer' }}
-                onClick={handleSignOut}
-              >
-                <span>Signed in as: {username}</span>
-              </div>
-            )}
-          </Nav>
         </Navbar.Collapse>
       </Container>
-
-      <UserModal
-        show={showUserModal}
-        onHide={() => setShowUserModal(false)}
-        onSignIn={handleSignIn}
-      />
     </Navbar>
   );
 };
