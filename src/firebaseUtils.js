@@ -199,6 +199,8 @@ export const addItemToReceipt = async (receiptId, itemData) => {
     quantity,
     totalAmount: price * quantity,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    updatedBy: itemData.updatedBy
   };
 
   // Only add userIds if there are any selected
@@ -325,18 +327,18 @@ export const updateReceiptTaxes = async (receiptId, taxData) => {
  * @param {Object} itemData - 更新的项目数据
  */
 export const updateReceiptItem = async (receiptId, itemIndex, itemData) => {
-  const receiptDoc = await getDoc(doc(db, 'receipts', receiptId));
-  const receiptData = receiptDoc.data();
+  const receiptRef = doc(db, 'receipts', receiptId);
+  const receiptDoc = await getDoc(receiptRef);
   
-  const updatedItems = [...receiptData.items];
-  updatedItems[itemIndex] = {
-    ...updatedItems[itemIndex],
-    ...itemData,
-    totalAmount: itemData.price * itemData.quantity,
-    updatedAt: new Date().toISOString()
-  };
+  if (receiptDoc.exists()) {
+    const items = [...receiptDoc.data().items];
+    items[itemIndex] = {
+      ...items[itemIndex],
+      ...itemData,
+      updatedAt: new Date().toISOString(),
+      updatedBy: itemData.updatedBy
+    };
 
-  await updateDoc(doc(db, 'receipts', receiptId), {
-    items: updatedItems
-  });
+    await updateDoc(receiptRef, { items });
+  }
 };

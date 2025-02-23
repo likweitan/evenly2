@@ -25,6 +25,7 @@ import {
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
+import Cookies from 'js-cookie';
 
 const styles = {
   container: {
@@ -672,69 +673,81 @@ const UserSummary = ({ users, items, receipt }) => {
   );
 };
 
-const TaxSettingsModal = ({ isOpen, onClose, onSubmit, initialData }) => {
+const TaxSettingsModal = ({ show, onHide, onSubmit, initialData }) => {
   const [taxes, setTaxes] = useState({
     sst: '',
     serviceCharge: ''
   });
 
   useEffect(() => {
-    setTaxes(initialData);
+    if (initialData) {
+      setTaxes({
+        sst: initialData.sst || '',
+        serviceCharge: initialData.serviceCharge || ''
+      });
+    }
   }, [initialData]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setTaxes(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const submitData = {
+    onSubmit({
       sst: taxes.sst ? Number(taxes.sst) : null,
       serviceCharge: taxes.serviceCharge ? Number(taxes.serviceCharge) : null
-    };
-    onSubmit(submitData);
+    });
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div style={styles.modal}>
-      <div style={styles.modalContent}>
-        <h2>Tax Settings</h2>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label>SST (%):</label>
-            <input
-              style={styles.input}
+    <Modal show={show} onHide={onHide} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Tax Settings</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form onSubmit={handleSubmit}>
+          <Form.Group className="mb-3">
+            <Form.Label>SST (%)</Form.Label>
+            <Form.Control
               type="number"
+              name="sst"
               value={taxes.sst}
-              onChange={(e) => setTaxes(prev => ({ ...prev, sst: e.target.value }))}
+              onChange={handleChange}
               placeholder="Enter SST percentage"
-              step="0.1"
               min="0"
               max="100"
+              step="0.1"
             />
-          </div>
-          <div style={styles.formGroup}>
-            <label>Service Charge (%):</label>
-            <input
-              style={styles.input}
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Service Charge (%)</Form.Label>
+            <Form.Control
               type="number"
+              name="serviceCharge"
               value={taxes.serviceCharge}
-              onChange={(e) => setTaxes(prev => ({ ...prev, serviceCharge: e.target.value }))}
+              onChange={handleChange}
               placeholder="Enter service charge percentage"
-              step="0.1"
               min="0"
               max="100"
+              step="0.1"
             />
-          </div>
-          <div style={styles.modalButtons}>
-            <button type="button" onClick={onClose} style={{...styles.button, backgroundColor: '#999'}}>
+          </Form.Group>
+          <div className="d-flex justify-content-end gap-2">
+            <Button variant="secondary" onClick={onHide}>
               Cancel
-            </button>
-            <button type="submit" style={styles.button}>
+            </Button>
+            <Button variant="primary" type="submit">
               Save
-            </button>
+            </Button>
           </div>
-        </form>
-      </div>
-    </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
   );
 };
 
@@ -777,7 +790,11 @@ const ReceiptPage = () => {
 
   const handleAddItem = async (itemData) => {
     try {
-      await addItemToReceipt(receiptId, itemData);
+      const username = Cookies.get('username');
+      await addItemToReceipt(receiptId, {
+        ...itemData,
+        updatedBy: username
+      });
       setIsModalOpen(false);
     } catch (error) {
       console.error('Failed to add item:', error);
@@ -851,17 +868,26 @@ const ReceiptPage = () => {
   const handleItemClick = (item, index, e) => {
     if (e.target.closest('button')) return;
     
+    console.log('Selected item:', item); // Debug log
     setSelectedItem({ 
       ...item, 
       index,
-      timestamp: item.updatedAt || item.createdAt // Use updatedAt if available, fall back to createdAt
+      timestamp: item.updatedAt || item.createdAt,
+      updatedBy: item.updatedBy
     });
     setIsEditModalOpen(true);
   };
 
   const handleEditItem = async (itemData) => {
     try {
-      await updateReceiptItem(receiptId, selectedItem.index, itemData);
+      const username = Cookies.get('username');
+      const updatedItem = {
+        ...itemData,
+        updatedAt: new Date().toISOString(),
+        updatedBy: username,
+      };
+      console.log('Saving item with data:', updatedItem); // Debug log
+      await updateReceiptItem(receiptId, selectedItem.index, updatedItem);
       setIsEditModalOpen(false);
       setSelectedItem(null);
     } catch (error) {
@@ -906,13 +932,20 @@ const ReceiptPage = () => {
             Created: {formatDate(receipt.createdAt)}
           </div>
         </div>
-        <Button 
-          variant="primary"
-          onClick={() => setIsTaxModalOpen(true)}
-        >
-          <i className="bi bi-gear-fill me-2"></i>
-          Tax Settings
-        </Button>
+        <div className="d-flex gap-2">
+          <Button 
+            variant="success"
+            onClick={() => setIsModalOpen(true)}
+          >
+            <i className="bi bi-plus-lg"></i>
+          </Button>
+          <Button 
+            variant="primary"
+            onClick={() => setIsTaxModalOpen(true)}
+          >
+            <i className="bi bi-gear-fill"></i>
+          </Button>
+        </div>
       </div>
 
       <Table hover responsive>
@@ -921,7 +954,6 @@ const ReceiptPage = () => {
             <th>Item Name</th>
             <th>Price</th>
             <th>Quantity</th>
-            <th>Subtotal</th>
             <th>Users</th>
             <th>Actions</th>
           </tr>
@@ -943,11 +975,6 @@ const ReceiptPage = () => {
                 <td>{item.name}</td>
                 <td>RM {item.price.toFixed(2)}</td>
                 <td>{item.quantity}</td>
-                <td>
-                  <Badge bg="info">
-                    RM {(item.price * item.quantity).toFixed(2)}
-                  </Badge>
-                </td>
                 <td>{getUserNames(item.userIds)}</td>
                 <td>
                   <Button
@@ -969,38 +996,46 @@ const ReceiptPage = () => {
 
       {receipt.items && receipt.items.length > 0 && (
         <>
-          <Card className="shadow-sm mb-4">
-            <Card.Body>
-              <Row className="text-end">
-                <Col>
-                  <div className="d-flex justify-content-end gap-5">
-                    <div>
-                      <div className="text-muted mb-1">Subtotal</div>
-                      <h4>RM {calculateSubtotal(receipt.items).toFixed(2)}</h4>
-                    </div>
-                    {receipt.sst && (
-                      <div>
-                        <div className="text-muted mb-1">SST ({receipt.sst}%)</div>
-                        <h4>RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).sst.toFixed(2)}</h4>
-                      </div>
-                    )}
-                    {receipt.serviceCharge && (
-                      <div>
-                        <div className="text-muted mb-1">Service Charge ({receipt.serviceCharge}%)</div>
-                        <h4>RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge.toFixed(2)}</h4>
-                      </div>
-                    )}
-                    <div>
-                      <div className="text-muted mb-1">Total</div>
-                      <h4 className="text-primary">
-                        RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).total.toFixed(2)}
-                      </h4>
-                    </div>
+          <div className="mb-4">
+              <div className="d-flex flex-column gap-2">
+                {/* Subtotal Row */}
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="text-muted">Subtotal</span>
+                  <span>RM {calculateSubtotal(receipt.items).toFixed(2)}</span>
+                </div>
+
+                {/* SST Row - only show if exists */}
+                {receipt.sst && (
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span className="text-muted">SST ({receipt.sst}%)</span>
+                    <span>
+                      RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).sst.toFixed(2)}
+                    </span>
                   </div>
-                </Col>
-              </Row>
-            </Card.Body>
-          </Card>
+                )}
+
+                {/* Service Charge Row - only show if exists */}
+                {receipt.serviceCharge && (
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span className="text-muted">Service Charge ({receipt.serviceCharge}%)</span>
+                    <span>
+                      RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+
+                {/* Divider */}
+                <hr className="my-2" />
+
+                {/* Total Row */}
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="fw-bold">Total</span>
+                  <span className="fw-bold text-primary fs-5">
+                    RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).total.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+              </div>
 
           <Card className="shadow-sm">
             <Card.Body>
@@ -1016,15 +1051,6 @@ const ReceiptPage = () => {
           </Card>
         </>
       )}
-
-      <Button
-        className="position-fixed bottom-0 end-0 m-4"
-        style={{ width: '60px', height: '60px', borderRadius: '30px' }}
-        variant="success"
-        onClick={() => setIsModalOpen(true)}
-      >
-        <i className="bi bi-plus-lg fs-4"></i>
-      </Button>
 
       <AddItemModal
         show={isModalOpen}
@@ -1047,8 +1073,8 @@ const ReceiptPage = () => {
       />
 
       <TaxSettingsModal
-        isOpen={isTaxModalOpen}
-        onClose={() => setIsTaxModalOpen(false)}
+        show={isTaxModalOpen}
+        onHide={() => setIsTaxModalOpen(false)}
         onSubmit={handleTaxUpdate}
         initialData={{
           sst: receipt.sst || '',
@@ -1075,17 +1101,20 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     name: '',
     price: '',
     quantity: '',
-    userIds: []
+    userIds: [],
+    updatedBy: ''
   });
 
   useEffect(() => {
     if (initialData) {
+      console.log('Initial data in modal:', initialData); // Debug log
       setItem({
         name: initialData.name,
         price: initialData.price,
         quantity: initialData.quantity,
         userIds: initialData.userIds || [],
-        timestamp: initialData.timestamp || initialData.createdAt // Use timestamp if available, fall back to createdAt
+        timestamp: initialData.timestamp || initialData.createdAt,
+        updatedBy: initialData.updatedBy
       });
     }
   }, [initialData]);
@@ -1104,7 +1133,11 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit(item);
+    const username = Cookies.get('username');
+    onSubmit({
+      ...item,
+      updatedBy: username
+    });
   };
 
   return (
@@ -1116,6 +1149,9 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
         {initialData?.timestamp && (
           <div className="text-muted mb-3">
             Last Updated: {formatDate(initialData.timestamp)}
+            {initialData.updatedBy && (
+              <span> by {initialData.updatedBy}</span>
+            )}
           </div>
         )}
         <Form onSubmit={handleSubmit}>

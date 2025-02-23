@@ -438,8 +438,7 @@ const GroupPage = () => {
         <Tab eventKey="receipts" title="Receipts">
           <div className="d-flex justify-content-end mb-3">
             <Button variant="success" onClick={() => setIsModalOpen(true)}>
-              <i className="bi bi-plus-lg me-2"></i>
-              Add Receipt
+              <i className="bi bi-plus-lg"></i>
             </Button>
           </div>
           <Table hover responsive className="bg-white rounded shadow-sm">
@@ -497,8 +496,7 @@ const GroupPage = () => {
                 setIsUserModalOpen(true);
               }}
             >
-              <i className="bi bi-person-plus me-2"></i>
-              Add User
+              <i className="bi bi-person-plus"></i>
             </Button>
           </div>
           <Table hover responsive className="bg-white rounded shadow-sm">
