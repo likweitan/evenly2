@@ -339,15 +339,23 @@ const styles = {
 };
 
 // Replace the existing MultiSelect component with this new design
-const UserSelect = ({ value, onChange, options, label }) => {
+const UserSelect = ({ value, onChange, options, label, disabled }) => {
   return (
     <div style={{
       border: '1px solid #ddd',
       borderRadius: '4px',
       padding: '12px',
-      backgroundColor: 'white',
+      backgroundColor: disabled ? '#f8f9fa' : 'white',
+      opacity: disabled ? 0.7 : 1,
     }}>
-      <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>{label}</div>
+      <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
+        {label}
+        {disabled && (
+          <small className="text-muted ms-2">
+            (Select consumers first)
+          </small>
+        )}
+      </div>
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(2, 1fr)',
@@ -355,23 +363,25 @@ const UserSelect = ({ value, onChange, options, label }) => {
         maxHeight: '200px',
         overflowY: 'auto'
       }}>
-        {options.map(option => (
+        {options.length > 0 ? options.map(option => (
           <div
             key={option.id}
             style={{
               display: 'flex',
               alignItems: 'center',
               padding: '8px',
-              cursor: 'pointer',
+              cursor: disabled ? 'not-allowed' : 'pointer',
               backgroundColor: value.includes(option.id) ? '#e3f2fd' : 'transparent',
               borderRadius: '4px',
               border: '1px solid #ddd',
             }}
             onClick={() => {
-              const newValue = value.includes(option.id)
-                ? value.filter(id => id !== option.id)
-                : [...value, option.id];
-              onChange(newValue);
+              if (!disabled) {
+                const newValue = value.includes(option.id)
+                  ? value.filter(id => id !== option.id)
+                  : [...value, option.id];
+                onChange(newValue);
+              }
             }}
           >
             <div
@@ -393,10 +403,9 @@ const UserSelect = ({ value, onChange, options, label }) => {
             </div>
             {option.name}
           </div>
-        ))}
-        {options.length === 0 && (
+        )) : (
           <div style={{ color: '#666', padding: '8px', gridColumn: '1 / -1' }}>
-            No users available
+            {disabled ? 'Select consumers first' : 'No users available'}
           </div>
         )}
       </div>
@@ -569,9 +578,17 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
 };
 
 const UserSummary = ({ users, items, receipt, receiptId }) => {
+  // Add state for items
+  const [localItems, setLocalItems] = useState(items);
+
+  // Update local items when props change
+  useEffect(() => {
+    setLocalItems(items);
+  }, [items]);
+
   const calculateUserSubtotal = (userId) => {
     let subtotal = 0;
-    items.forEach(item => {
+    localItems.forEach(item => {
       if (item.userIds && item.userIds.includes(userId)) {
         const perPersonCost = (item.price * item.quantity) / item.userIds.length;
         subtotal += perPersonCost;
@@ -587,7 +604,7 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
     }
 
     let total = 0;
-    items.forEach(item => {
+    localItems.forEach(item => {
       if (item.userIds && item.userIds.includes(userId)) {
         // Calculate base amount for this item
         const itemTotal = item.price * item.quantity;
@@ -622,7 +639,7 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
   };
 
   const getUserItems = (userId) => {
-    return items.filter(item => 
+    return localItems.filter(item => 
       item.userIds && item.userIds.includes(userId)
     ).map(item => ({
       ...item,
@@ -633,7 +650,7 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
   const calculateUserPayments = (userId) => {
     // If this is the receipt owner (paidTo), they paid the total amount
     if (userId === receipt.paidTo) {
-      const totalAmount = items.reduce((sum, item) => {
+      const totalAmount = localItems.reduce((sum, item) => {
         return sum + (item.price * item.quantity);
       }, 0);
 
@@ -649,7 +666,7 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
 
     // For non-owners, calculate their paid amount
     let totalPaid = 0;
-    items.forEach(item => {
+    localItems.forEach(item => {
       if (item.paidByIds && item.paidByIds.includes(userId)) {
         // Calculate base amount for this item
         const itemTotal = item.price * item.quantity;
@@ -678,19 +695,25 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
     return totalPaid;
   };
 
-  // Add this function to handle bulk payment updates
-  const handleBulkPaymentUpdate = async (userId, isPaying) => {
+  const handleBulkPaymentUpdate = async (userId, shouldMarkAsPaid, receiptItems = null) => {
     try {
-      // Create a copy of all items with updated paidByIds
-      const updatedItems = receipt.items.map(item => {
-        // Only update items where the user is a consumer
-        if (item.userIds && item.userIds.includes(userId)) {
-          const paidByIds = new Set(item.paidByIds || []);
-          if (isPaying) {
+      // If receiptItems is provided, only update those items
+      const itemsToUpdate = receiptItems || localItems;
+      
+      // Create a copy of all items with updates
+      const updatedItems = localItems.map(item => {
+        // Check if this item should be updated
+        if (itemsToUpdate.find(updateItem => updateItem === item) && 
+            item.userIds && 
+            item.userIds.includes(userId)) {
+          let paidByIds = new Set(item.paidByIds || []);
+          
+          if (shouldMarkAsPaid) {
             paidByIds.add(userId);
           } else {
             paidByIds.delete(userId);
           }
+          
           return {
             ...item,
             paidByIds: Array.from(paidByIds)
@@ -699,11 +722,16 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
         return item;
       });
 
-      // Update all items at once using the new function
+      // Update local state immediately
+      setLocalItems(updatedItems);
+
+      // Update Firebase
       await updateAllReceiptItems(receiptId, updatedItems);
     } catch (error) {
-      console.error('Failed to update payments:', error);
-      alert('Failed to update payments');
+      console.error('Failed to update payment status:', error);
+      alert('Failed to update payment status');
+      // Revert local state on error
+      setLocalItems(items);
     }
   };
 
@@ -728,15 +756,17 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
             <div className="bg-white rounded shadow-sm">
               <div className="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
                 <div className="d-flex align-items-center gap-2">
-                  {user.id !== receipt.paidTo && userItems.length > 0 && (
-                    <Form.Check
-                      type="checkbox"
-                      checked={isAllPaid}
-                      onChange={(e) => handleBulkPaymentUpdate(user.id, e.target.checked)}
-                      label=""
-                      className="me-2"
-                    />
-                  )}
+                  <Form.Check
+                    type="checkbox"
+                    checked={isAllPaid}
+                    onChange={(e) => {
+                      // Get all items for this user in this receipt
+                      const userItems = getUserItems(user.id);
+                      handleBulkPaymentUpdate(user.id, !isAllPaid, userItems);
+                    }}
+                    label=""
+                    className="me-2"
+                  />
                   <span className="fw-bold">
                     {user.name}
                     {user.id === receipt.paidTo && (
@@ -970,24 +1000,189 @@ const formatDate = (dateString) => {
 const calculateReceiptPaidPercentage = (receipt) => {
   if (!receipt.items || !receipt.items.length) return 0;
   
-  let totalPaidItems = 0;
-  let totalItems = receipt.items.length;
+  // Calculate total amount excluding owner's items
+  let totalAmount = 0;
+  let totalPaidAmount = 0;
 
+  // First calculate total amount excluding owner's items
   receipt.items.forEach(item => {
+    const itemTotal = item.price * item.quantity;
     const consumersExcludingOwner = (item.userIds || [])
       .filter(id => id !== receipt.paidTo);
-    const payersExcludingOwner = (item.paidByIds || [])
-      .filter(id => id !== receipt.paidTo);
     
-    if (consumersExcludingOwner.length > 0 && 
-        payersExcludingOwner.length > 0 && 
-        consumersExcludingOwner.length === payersExcludingOwner.length && 
-        consumersExcludingOwner.every(id => payersExcludingOwner.includes(id))) {
-      totalPaidItems++;
+    if (consumersExcludingOwner.length > 0) {
+      // Add this item's share to total
+      totalAmount += itemTotal;
     }
   });
 
-  return (totalPaidItems / totalItems) * 100;
+  // Add taxes to total amount
+  if (receipt.sst) {
+    totalAmount += totalAmount * (receipt.sst / 100);
+  }
+  if (receipt.serviceCharge) {
+    totalAmount += totalAmount * (receipt.serviceCharge / 100);
+  }
+
+  // Calculate paid amount
+  receipt.items.forEach(item => {
+    const itemTotal = item.price * item.quantity;
+    const consumersExcludingOwner = (item.userIds || [])
+      .filter(id => id !== receipt.paidTo);
+    const payersExcludingOwner = (item.paidByIds || [])
+      .filter(id => id !== receipt.paidTo)
+      .filter(id => item.userIds.includes(id));
+
+    if (consumersExcludingOwner.length > 0) {
+      const perPersonShare = itemTotal / consumersExcludingOwner.length;
+      let perPersonShareWithTaxes = perPersonShare;
+      
+      if (receipt.sst) {
+        perPersonShareWithTaxes += perPersonShare * (receipt.sst / 100);
+      }
+      if (receipt.serviceCharge) {
+        perPersonShareWithTaxes += perPersonShare * (receipt.serviceCharge / 100);
+      }
+
+      totalPaidAmount += perPersonShareWithTaxes * payersExcludingOwner.length;
+    }
+  });
+
+  return totalAmount > 0 ? (totalPaidAmount / totalAmount) * 100 : 0;
+};
+
+// Update the InsightsTab component definition
+const InsightsTab = ({ receipt, users, items, calculateTaxes, calculateSubtotal }) => {
+  // Calculate various statistics
+  const stats = {
+    totalItems: items.length,
+    totalAmount: calculateTaxes(calculateSubtotal(items), receipt).total,
+    averagePerPerson: calculateTaxes(calculateSubtotal(items), receipt).total / 
+      (users.filter(u => u.id !== receipt.paidTo).length || 1),
+    mostExpensiveItem: [...items].sort((a, b) => (b.price * b.quantity) - (a.price * a.quantity))[0],
+    mostSharedItem: [...items].sort((a, b) => (b.userIds?.length || 0) - (a.userIds?.length || 0))[0],
+  };
+
+  // Calculate per-user statistics
+  const userStats = users.map(user => {
+    const userItems = items.filter(item => item.userIds?.includes(user.id));
+    const totalOwed = userItems.reduce((sum, item) => {
+      const perPersonCost = (item.price * item.quantity) / (item.userIds?.length || 1);
+      return sum + perPersonCost;
+    }, 0);
+    const itemsPaid = items.filter(item => item.paidByIds?.includes(user.id)).length;
+
+    return {
+      ...user,
+      itemsConsumed: userItems.length,
+      totalOwed,
+      itemsPaid,
+    };
+  });
+
+  return (
+    <div className="pt-3">
+      {/* Key Statistics */}
+      <div className="row g-3 mb-4">
+        <div className="col-md-4">
+          <Card className="h-100">
+            <Card.Body>
+              <h6 className="text-muted mb-2">Total Amount</h6>
+              <h3 className="mb-0">RM {stats.totalAmount.toFixed(2)}</h3>
+            </Card.Body>
+          </Card>
+        </div>
+        <div className="col-md-4">
+          <Card className="h-100">
+            <Card.Body>
+              <h6 className="text-muted mb-2">Items</h6>
+              <h3 className="mb-0">{stats.totalItems}</h3>
+            </Card.Body>
+          </Card>
+        </div>
+        <div className="col-md-4">
+          <Card className="h-100">
+            <Card.Body>
+              <h6 className="text-muted mb-2">Average Per Person</h6>
+              <h3 className="mb-0">RM {stats.averagePerPerson.toFixed(2)}</h3>
+            </Card.Body>
+          </Card>
+        </div>
+      </div>
+
+      {/* Most Expensive & Most Shared Items */}
+      <div className="row g-3 mb-4">
+        <div className="col-md-6">
+          <Card className="h-100">
+            <Card.Body>
+              <h6 className="text-muted mb-3">Most Expensive Item</h6>
+              {stats.mostExpensiveItem && (
+                <>
+                  <h5>{stats.mostExpensiveItem.name}</h5>
+                  <div className="text-primary">
+                    RM {(stats.mostExpensiveItem.price * stats.mostExpensiveItem.quantity).toFixed(2)}
+                  </div>
+                  <small className="text-muted">
+                    Shared by {stats.mostExpensiveItem.userIds?.length || 0} people
+                  </small>
+                </>
+              )}
+            </Card.Body>
+          </Card>
+        </div>
+        <div className="col-md-6">
+          <Card className="h-100">
+            <Card.Body>
+              <h6 className="text-muted mb-3">Most Shared Item</h6>
+              {stats.mostSharedItem && (
+                <>
+                  <h5>{stats.mostSharedItem.name}</h5>
+                  <div className="text-primary">
+                    {stats.mostSharedItem.userIds?.length || 0} people sharing
+                  </div>
+                  <small className="text-muted">
+                    RM {(stats.mostSharedItem.price * stats.mostSharedItem.quantity).toFixed(2)}
+                  </small>
+                </>
+              )}
+            </Card.Body>
+          </Card>
+        </div>
+      </div>
+
+      {/* User Statistics Table */}
+      <Card>
+        <Card.Body>
+          <h6 className="mb-3">User Statistics</h6>
+          <Table hover responsive>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th className="text-end">Items Consumed</th>
+                <th className="text-end">Items Paid</th>
+                <th className="text-end">Total Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {userStats.map(user => (
+                <tr key={user.id}>
+                  <td>
+                    {user.name}
+                    {user.id === receipt.paidTo && (
+                      <Badge bg="info" className="ms-2">Owner</Badge>
+                    )}
+                  </td>
+                  <td className="text-end">{user.itemsConsumed}</td>
+                  <td className="text-end">{user.itemsPaid}</td>
+                  <td className="text-end">RM {user.totalOwed.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card.Body>
+      </Card>
+    </div>
+  );
 };
 
 const ReceiptPage = () => {
@@ -1048,13 +1243,11 @@ const ReceiptPage = () => {
   };
 
   const handleDeleteItem = async (itemIndex) => {
-    if (window.confirm('Are you sure you want to delete this item?')) {
-      try {
-        await deleteReceiptItem(receiptId, itemIndex);
-      } catch (error) {
-        console.error('Failed to delete item:', error);
-        alert('Failed to delete item');
-      }
+    try {
+      await deleteReceiptItem(receiptId, itemIndex);
+    } catch (error) {
+      console.error('Failed to delete item:', error);
+      alert('Failed to delete item');
     }
   };
 
@@ -1105,28 +1298,41 @@ const ReceiptPage = () => {
 
   const handleEditItem = async (itemData) => {
     try {
-      // Create a clean item object with all required fields
-      const updatedItem = {
+      if (itemData.isDelete) {
+        await handleDeleteItem(itemData.index);
+        setIsEditModalOpen(false);  // Close only on delete
+        setSelectedItem(null);
+        return;
+      }
+
+      if (itemData.isCopy) {
+        await addItemToReceipt(receiptId, {
+          name: itemData.name,
+          price: itemData.price,
+          quantity: itemData.quantity,
+          userIds: itemData.userIds,
+          paidByIds: itemData.paidByIds
+        });
+        setIsEditModalOpen(false);  // Close only on copy
+        setSelectedItem(null);
+        return;
+      }
+
+      // Regular update - don't close modal
+      await updateReceiptItem(receiptId, selectedItem.index, {
         name: itemData.name,
         price: Number(itemData.price),
         quantity: Number(itemData.quantity),
-        userIds: itemData.userIds || [],
-        paidByIds: itemData.paidByIds || [],
-        updatedAt: new Date().toISOString(),
-      };
+        userIds: itemData.userIds,
+        paidByIds: itemData.paidByIds
+      });
 
-      if (itemData.isDelete) {
-        await deleteReceiptItem(receiptId, itemData.index);
-      } else if (itemData.isCopy) {
-        // For copy, use addItemToReceipt with clean data
-        await addItemToReceipt(receiptId, updatedItem);
-      } else {
-        // For update, use updateReceiptItem with clean data
-        await updateReceiptItem(receiptId, selectedItem.index, updatedItem);
-      }
+      // Update the selected item state to reflect changes
+      setSelectedItem(prev => ({
+        ...prev,
+        ...itemData
+      }));
 
-      setIsEditModalOpen(false);
-      setSelectedItem(null);
     } catch (error) {
       console.error('Failed to update item:', error);
       alert('Failed to update item');
@@ -1386,6 +1592,16 @@ const ReceiptPage = () => {
             />
           </div>
         </Tab>
+
+        <Tab eventKey="insights" title="Insights">
+          <InsightsTab 
+            receipt={receipt}
+            users={group.members}
+            items={receipt.items || []}
+            calculateTaxes={calculateTaxes}
+            calculateSubtotal={calculateSubtotal}
+          />
+        </Tab>
       </Tabs>
 
       <AddItemModal
@@ -1459,27 +1675,30 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     }
   }, [initialData]);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setItem(prev => ({
-      ...prev,
-      [name]: name === 'name' ? value : Number(value)
-    }));
+  // Add function to handle auto-save
+  const handleAutoSave = (newItem) => {
+    onSubmit({
+      ...newItem,
+    });
+  };
+
+  // Update change handlers to auto-save
+  const handleFieldChange = (field, value) => {
+    const newItem = { ...item, [field]: value };
+    setItem(newItem);
+    handleAutoSave(newItem);
   };
 
   const handleUsersChange = (userIds) => {
-    setItem(prev => ({ ...prev, userIds }));
+    const newItem = { ...item, userIds };
+    setItem(newItem);
+    handleAutoSave(newItem);
   };
 
   const handlePaidByChange = (paidByIds) => {
-    setItem(prev => ({ ...prev, paidByIds }));
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit({
-      ...item,
-    });
+    const newItem = { ...item, paidByIds };
+    setItem(newItem);
+    handleAutoSave(newItem);
   };
 
   const handleCopy = () => {
@@ -1493,10 +1712,15 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     if (window.confirm('Are you sure you want to delete this item?')) {
       onSubmit({
         ...item,
-        isDelete: true,  // Add flag to indicate this is a deletion
+        isDelete: true,
         index: initialData.index
       });
     }
+  };
+
+  // Get filtered users for Paid By select based on Consumed By selection
+  const getPaidByOptions = () => {
+    return users.filter(user => item.userIds.includes(user.id));
   };
 
   return (
@@ -1510,13 +1734,13 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
             Last Updated: {formatDate(initialData.timestamp)}
           </div>
         )}
-        <Form onSubmit={handleSubmit}>
+        <Form>
           <Form.Group className="mb-3">
             <Form.Label>Item Name</Form.Label>
             <Form.Control
               type="text"
               value={item.name}
-              onChange={(e) => setItem(prev => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => handleFieldChange('name', e.target.value)}
               placeholder="Enter item name"
               required
             />
@@ -1528,7 +1752,7 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
               <Form.Control
                 type="number"
                 value={item.price}
-                onChange={(e) => setItem(prev => ({ ...prev, price: e.target.value }))}
+                onChange={(e) => handleFieldChange('price', e.target.value)}
                 step="0.01"
                 min="0"
                 placeholder="Enter price"
@@ -1540,7 +1764,7 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
               <Form.Control
                 type="number"
                 value={item.quantity}
-                onChange={(e) => setItem(prev => ({ ...prev, quantity: e.target.value }))}
+                onChange={(e) => handleFieldChange('quantity', e.target.value)}
                 min="1"
                 placeholder="Qty"
                 required
@@ -1550,18 +1774,29 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
 
           <Form.Group className="mb-3">
             <UserSelect
-              label="Consumed By (Optional)"
+              label="Consumed By"
               value={item.userIds}
-              onChange={handleUsersChange}
+              onChange={(userIds) => {
+                // When Consumed By changes, filter out any Paid By users that are no longer consumers
+                const newPaidByIds = item.paidByIds.filter(id => userIds.includes(id));
+                const newItem = { 
+                  ...item, 
+                  userIds,
+                  paidByIds: newPaidByIds
+                };
+                setItem(newItem);
+                handleAutoSave(newItem);
+              }}
               options={users}
             />
           </Form.Group>
           <Form.Group className="mb-3">
             <UserSelect
-              label="Paid By (Optional)"
+              label="Paid By"
               value={item.paidByIds}
               onChange={handlePaidByChange}
-              options={users}
+              options={getPaidByOptions()}  // Only show users selected in Consumed By
+              disabled={item.userIds.length === 0}  // Disable if no consumers selected
             />
           </Form.Group>
           <div className="d-flex justify-content-end gap-2">
@@ -1580,13 +1815,6 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
               title="Copy"
             >
               <i className="bi bi-files"></i>
-            </Button>
-            <Button 
-              variant="primary" 
-              type="submit"
-              title="Save"
-            >
-              <i className="bi bi-check-lg"></i>
             </Button>
           </div>
         </Form>
