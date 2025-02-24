@@ -11,7 +11,8 @@ import {
   updateReceiptTaxes,
   updateReceiptItem,
   updateReceiptSettings,
-  deleteReceipt
+  deleteReceipt,
+  updateAllReceiptItems
 } from './firebaseUtils';
 import { 
   Container, 
@@ -30,6 +31,7 @@ import {
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
+import CountUp from 'react-countup';
 
 const styles = {
   container: {
@@ -582,7 +584,7 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
   );
 };
 
-const UserSummary = ({ users, items, receipt }) => {
+const UserSummary = ({ users, items, receipt, receiptId }) => {
   const calculateUserSubtotal = (userId) => {
     let subtotal = 0;
     items.forEach(item => {
@@ -600,18 +602,37 @@ const UserSummary = ({ users, items, receipt }) => {
       return 0;
     }
 
-    const subtotal = calculateUserSubtotal(userId);
-    let total = subtotal;
+    let total = 0;
+    items.forEach(item => {
+      if (item.userIds && item.userIds.includes(userId)) {
+        // Calculate base amount for this item
+        const itemTotal = item.price * item.quantity;
+        
+        // Get number of consumers (excluding owner)
+        const consumersCount = (item.userIds || [])
+          .filter(id => id !== receipt.paidTo)
+          .length;
+        
+        // Calculate per person share
+        const perPersonShare = consumersCount > 0 ? itemTotal / consumersCount : 0;
+        
+        // Calculate total with taxes for this person's share
+        let perPersonTotal = perPersonShare;
+        if (receipt.sst) {
+          perPersonTotal += perPersonShare * (receipt.sst / 100);
+        }
+        if (receipt.serviceCharge) {
+          perPersonTotal += perPersonShare * (receipt.serviceCharge / 100);
+        }
 
-    // Add tax and service charge if applicable
-    if (total > 0) {
-      if (receipt.sst) {
-        total += total * (receipt.sst / 100);
+        // Deduct if this person has paid for their share
+        if (item.paidByIds && item.paidByIds.includes(userId)) {
+          perPersonTotal = 0;
+        }
+
+        total += perPersonTotal;
       }
-      if (receipt.serviceCharge) {
-        total += total * (receipt.serviceCharge / 100);
-      }
-    }
+    });
 
     return total;
   };
@@ -642,14 +663,64 @@ const UserSummary = ({ users, items, receipt }) => {
       return total;
     }
 
-    let paid = 0;
+    // For non-owners, calculate their paid amount
+    let totalPaid = 0;
     items.forEach(item => {
       if (item.paidByIds && item.paidByIds.includes(userId)) {
-        const perPersonPaid = (item.price * item.quantity) / item.paidByIds.length;
-        paid += perPersonPaid;
+        // Calculate base amount for this item
+        const itemTotal = item.price * item.quantity;
+        
+        // Get number of consumers (excluding owner)
+        const consumersCount = (item.userIds || [])
+          .filter(id => id !== receipt.paidTo)
+          .length;
+        
+        // Calculate per person share
+        const perPersonShare = consumersCount > 0 ? itemTotal / consumersCount : 0;
+        
+        // Calculate total with taxes for this person's share
+        let perPersonTotal = perPersonShare;
+        if (receipt.sst) {
+          perPersonTotal += perPersonShare * (receipt.sst / 100);
+        }
+        if (receipt.serviceCharge) {
+          perPersonTotal += perPersonShare * (receipt.serviceCharge / 100);
+        }
+
+        totalPaid += perPersonTotal;
       }
     });
-    return paid;
+
+    return totalPaid;
+  };
+
+  // Add this function to handle bulk payment updates
+  const handleBulkPaymentUpdate = async (userId, isPaying) => {
+    try {
+      // Create a copy of all items with updated paidByIds
+      const updatedItems = receipt.items.map(item => {
+        // Only update items where the user is a consumer
+        if (item.userIds && item.userIds.includes(userId)) {
+          const paidByIds = new Set(item.paidByIds || []);
+          if (isPaying) {
+            paidByIds.add(userId);
+          } else {
+            paidByIds.delete(userId);
+          }
+          return {
+            ...item,
+            paidByIds: Array.from(paidByIds)
+          };
+        }
+        return item;
+      });
+
+      // Update all items at once using the new function
+      await updateAllReceiptItems(receiptId, updatedItems);
+    } catch (error) {
+      console.error('Failed to update payments:', error);
+      alert('Failed to update payments');
+    }
   };
 
   return (
@@ -663,19 +734,47 @@ const UserSummary = ({ users, items, receipt }) => {
         const shouldShow = userItems.length > 0 || user.id === receipt.paidTo;
         if (!shouldShow) return null;
 
+        // Calculate if all consumed items are paid
+        const isAllPaid = userItems.every(item => 
+          item.paidByIds && item.paidByIds.includes(user.id)
+        );
+
         return (
           <div key={user.id} className="mb-4">
             <div className="bg-white rounded shadow-sm">
               <div className="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-                <span className="fw-bold">
-                  {user.name}
-                  {user.id === receipt.paidTo && (
-                    <Badge bg="primary" className="ms-2">Owner</Badge>
+                <div className="d-flex align-items-center gap-2">
+                  {user.id !== receipt.paidTo && userItems.length > 0 && (
+                    <Form.Check
+                      type="checkbox"
+                      checked={isAllPaid}
+                      onChange={(e) => handleBulkPaymentUpdate(user.id, e.target.checked)}
+                      label=""
+                      className="me-2"
+                    />
                   )}
-                </span>
+                  <span className="fw-bold">
+                    {user.name}
+                    {user.id === receipt.paidTo && (
+                      <Badge bg="primary" className="ms-2">Owner</Badge>
+                    )}
+                  </span>
+                </div>
                 <div className="text-end">
-                  <div className="text-muted small">Paid: RM {paid.toFixed(2)}</div>
-                  <div className="text-primary fw-bold">Owed: RM {total.toFixed(2)}</div>
+                  <div className="text-muted small">
+                    Paid: RM <CountUp
+                      end={paid}
+                      decimals={2}
+                      duration={0.75}
+                    />
+                  </div>
+                  <div className="text-primary fw-bold">
+                    Owed: RM <CountUp
+                      end={total}
+                      decimals={2}
+                      duration={0.75}
+                    />
+                  </div>
                 </div>
               </div>
               <div className="p-3">
@@ -694,7 +793,13 @@ const UserSummary = ({ users, items, receipt }) => {
                           </small>
                         )}
                       </div>
-                      <span>RM {item.perPersonCost.toFixed(2)}</span>
+                      <span>
+                        RM <CountUp
+                          end={item.perPersonCost}
+                          decimals={2}
+                          duration={0.5}
+                        />
+                      </span>
                     </div>
                   );
                 })}
@@ -704,23 +809,47 @@ const UserSummary = ({ users, items, receipt }) => {
                   <div className="mt-3 pt-3 border-top">
                     <div className="d-flex justify-content-between text-muted small mb-1">
                       <span>Subtotal</span>
-                      <span>RM {subtotal.toFixed(2)}</span>
+                      <span>
+                        RM <CountUp
+                          end={subtotal}
+                          decimals={2}
+                          duration={0.75}
+                        />
+                      </span>
                     </div>
                     {receipt.sst && (
                       <div className="d-flex justify-content-between text-muted small mb-1">
                         <span>SST ({receipt.sst}%)</span>
-                        <span>RM {(subtotal * receipt.sst / 100).toFixed(2)}</span>
+                        <span>
+                          RM <CountUp
+                            end={subtotal * receipt.sst / 100}
+                            decimals={2}
+                            duration={0.75}
+                          />
+                        </span>
                       </div>
                     )}
                     {receipt.serviceCharge && (
                       <div className="d-flex justify-content-between text-muted small mb-1">
                         <span>Service Charge ({receipt.serviceCharge}%)</span>
-                        <span>RM {(subtotal * receipt.serviceCharge / 100).toFixed(2)}</span>
+                        <span>
+                          RM <CountUp
+                            end={subtotal * receipt.serviceCharge / 100}
+                            decimals={2}
+                            duration={0.75}
+                          />
+                        </span>
                       </div>
                     )}
                     <div className="d-flex justify-content-between fw-bold small mt-2">
                       <span>Total</span>
-                      <span>RM {(user.id === receipt.paidTo ? subtotal : total).toFixed(2)}</span>
+                      <span>
+                        RM <CountUp
+                          end={user.id === receipt.paidTo ? subtotal : total}
+                          decimals={2}
+                          duration={1}
+                        />
+                      </span>
                     </div>
                   </div>
                 )}
@@ -1116,7 +1245,12 @@ const ReceiptPage = () => {
             <div className="d-flex justify-content-between align-items-center mb-1">
               <small className="text-muted">Payment Progress</small>
               <small className="text-success">
-                {calculateReceiptPaidPercentage(receipt).toFixed(1)}%
+                <CountUp
+                  end={calculateReceiptPaidPercentage(receipt)}
+                  decimals={1}
+                  duration={0.75}
+                  suffix="%"
+                />
               </small>
             </div>
             <div className="progress" style={{ height: '6px' }}>
@@ -1209,11 +1343,21 @@ const ReceiptPage = () => {
                           </div>
                         </td>
                         <td className="text-end">
-                          <Badge bg="info">RM {item.price.toFixed(2)}</Badge>
+                          <Badge bg="info">
+                            RM <CountUp 
+                              end={item.price} 
+                              decimals={2}
+                              duration={0.5}
+                            />
+                          </Badge>
                         </td>
                         <td className="text-end">{item.quantity}</td>
                         <td className="text-end">
-                          RM {(item.price * item.quantity).toFixed(2)}
+                          RM <CountUp 
+                            end={item.price * item.quantity} 
+                            decimals={2}
+                            duration={0.5}
+                          />
                         </td>
                       </tr>
                     );
@@ -1228,7 +1372,13 @@ const ReceiptPage = () => {
                   {/* Subtotal Row */}
                   <div className="d-flex justify-content-between align-items-center">
                     <span className="text-muted">Subtotal</span>
-                    <span>RM {calculateSubtotal(receipt.items).toFixed(2)}</span>
+                    <span>
+                      RM <CountUp 
+                        end={calculateSubtotal(receipt.items)} 
+                        decimals={2}
+                        duration={0.75}
+                      />
+                    </span>
                   </div>
 
                   {/* SST Row - only show if exists */}
@@ -1236,7 +1386,11 @@ const ReceiptPage = () => {
                     <div className="d-flex justify-content-between align-items-center">
                       <span className="text-muted">SST ({receipt.sst}%)</span>
                       <span>
-                        RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).sst.toFixed(2)}
+                        RM <CountUp 
+                          end={calculateTaxes(calculateSubtotal(receipt.items), receipt).sst} 
+                          decimals={2}
+                          duration={0.75}
+                        />
                       </span>
                     </div>
                   )}
@@ -1246,7 +1400,11 @@ const ReceiptPage = () => {
                     <div className="d-flex justify-content-between align-items-center">
                       <span className="text-muted">Service Charge ({receipt.serviceCharge}%)</span>
                       <span>
-                        RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge.toFixed(2)}
+                        RM <CountUp 
+                          end={calculateTaxes(calculateSubtotal(receipt.items), receipt).serviceCharge} 
+                          decimals={2}
+                          duration={0.75}
+                        />
                       </span>
                     </div>
                   )}
@@ -1258,7 +1416,11 @@ const ReceiptPage = () => {
                   <div className="d-flex justify-content-between align-items-center">
                     <span className="fw-bold">Total</span>
                     <span className="fw-bold text-primary fs-5">
-                      RM {calculateTaxes(calculateSubtotal(receipt.items), receipt).total.toFixed(2)}
+                      RM <CountUp 
+                        end={calculateTaxes(calculateSubtotal(receipt.items), receipt).total} 
+                        decimals={2}
+                        duration={1}
+                      />
                     </span>
                   </div>
                 </div>
@@ -1270,9 +1432,10 @@ const ReceiptPage = () => {
         <Tab eventKey="summary" title="Summary">
           <div className="pt-3">
             <UserSummary 
-              users={group.members || []}
-              items={receipt.items}
+              users={group.members} 
+              items={receipt.items} 
               receipt={receipt}
+              receiptId={receiptId}
             />
           </div>
         </Tab>

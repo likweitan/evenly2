@@ -372,3 +372,12 @@ export const updateReceiptSettings = async (receiptId, settingsData) => {
     updatedAt: new Date().toISOString()
   });
 };
+
+// Add this new function to handle bulk item updates
+export const updateAllReceiptItems = async (receiptId, items) => {
+  const receiptRef = doc(db, 'receipts', receiptId);
+  await updateDoc(receiptRef, { 
+    items: items,
+    updatedAt: new Date().toISOString()
+  });
+};
