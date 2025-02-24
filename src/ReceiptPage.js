@@ -581,19 +581,25 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
 };
 
 const UserSummary = ({ users, items, receipt }) => {
+  const calculateUserSubtotal = (userId) => {
+    let subtotal = 0;
+    items.forEach(item => {
+      if (item.userIds && item.userIds.includes(userId)) {
+        const perPersonCost = (item.price * item.quantity) / item.userIds.length;
+        subtotal += perPersonCost;
+      }
+    });
+    return subtotal;
+  };
+
   const calculateUserTotal = (userId) => {
     // If this is the receipt owner (paidTo), they don't owe anything
     if (userId === receipt.paidTo) {
       return 0;
     }
 
-    let total = 0;
-    items.forEach(item => {
-      if (item.userIds && item.userIds.includes(userId)) {
-        const perPersonCost = (item.price * item.quantity) / item.userIds.length;
-        total += perPersonCost;
-      }
-    });
+    const subtotal = calculateUserSubtotal(userId);
+    let total = subtotal;
 
     // Add tax and service charge if applicable
     if (total > 0) {
@@ -648,10 +654,10 @@ const UserSummary = ({ users, items, receipt }) => {
     <>
       {users.map(user => {
         const userItems = getUserItems(user.id);
+        const subtotal = calculateUserSubtotal(user.id);
         const total = calculateUserTotal(user.id);
         const paid = calculateUserPayments(user.id);
         
-        // Show the owner even if they have no items
         const shouldShow = userItems.length > 0 || user.id === receipt.paidTo;
         if (!shouldShow) return null;
 
@@ -671,33 +677,49 @@ const UserSummary = ({ users, items, receipt }) => {
                 </div>
               </div>
               <div className="p-3">
-                {userItems.map((item, index) => (
-                  <div key={index} className="d-flex justify-content-between align-items-center mb-2">
-                    <div>
-                      <span>{item.name}</span>
-                      {item.userIds.length > 1 && (
-                        <small className="text-muted ms-2">
-                          (Split by {item.userIds.length} persons)
-                        </small>
-                      )}
+                {userItems.map((item, index) => {
+                  const splitCount = item.userIds
+                    .filter(id => id !== receipt.paidTo)
+                    .length;
+
+                  return (
+                    <div key={index} className="d-flex justify-content-between align-items-center mb-2">
+                      <div>
+                        <span>{item.name}</span>
+                        {splitCount > 1 && (
+                          <small className="text-muted ms-2">
+                            (Split by {splitCount} persons)
+                          </small>
+                        )}
+                      </div>
+                      <span>RM {item.perPersonCost.toFixed(2)}</span>
                     </div>
-                    <span>RM {item.perPersonCost.toFixed(2)}</span>
-                  </div>
-                ))}
-                {(receipt.sst || receipt.serviceCharge) && total > 0 && (
+                  );
+                })}
+
+                {/* Always show subtotal and taxes if there are items */}
+                {userItems.length > 0 && (
                   <div className="mt-3 pt-3 border-top">
+                    <div className="d-flex justify-content-between text-muted small mb-1">
+                      <span>Subtotal</span>
+                      <span>RM {subtotal.toFixed(2)}</span>
+                    </div>
                     {receipt.sst && (
                       <div className="d-flex justify-content-between text-muted small mb-1">
                         <span>SST ({receipt.sst}%)</span>
-                        <span>RM {(total * receipt.sst / 100).toFixed(2)}</span>
+                        <span>RM {(subtotal * receipt.sst / 100).toFixed(2)}</span>
                       </div>
                     )}
                     {receipt.serviceCharge && (
-                      <div className="d-flex justify-content-between text-muted small">
+                      <div className="d-flex justify-content-between text-muted small mb-1">
                         <span>Service Charge ({receipt.serviceCharge}%)</span>
-                        <span>RM {(total * receipt.serviceCharge / 100).toFixed(2)}</span>
+                        <span>RM {(subtotal * receipt.serviceCharge / 100).toFixed(2)}</span>
                       </div>
                     )}
+                    <div className="d-flex justify-content-between fw-bold small mt-2">
+                      <span>Total</span>
+                      <span>RM {(user.id === receipt.paidTo ? subtotal : total).toFixed(2)}</span>
+                    </div>
                   </div>
                 )}
               </div>

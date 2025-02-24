@@ -67,7 +67,17 @@ const AppNavbar = () => {
       <Container>
         <Navbar.Brand as={Link} to="/">Evenly</Navbar.Brand>
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
-        <Navbar.Collapse id="basic-navbar-nav">
+        <Navbar.Collapse id="basic-navbar-nav" className="justify-content-end">
+          <Nav>
+            <Nav.Link 
+              href="https://github.com/likweitan/evenly2/tree/main" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="d-flex align-items-center"
+            >
+              <i className="bi bi-github" style={{ fontSize: '1.2rem' }}></i>
+            </Nav.Link>
+          </Nav>
         </Navbar.Collapse>
       </Container>
     </Navbar>
