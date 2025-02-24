@@ -404,30 +404,21 @@ const UserSelect = ({ value, onChange, options, label }) => {
   );
 };
 
-const AddItemModal = ({ show, onHide, onSubmit, users }) => {
+const AddItemModal = ({ show, onHide, onSubmit }) => {
   const [item, setItem] = useState({
     name: '',
     price: '',
-    quantity: '',
-    userIds: []
+    quantity: '1'
   });
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setItem(prev => ({
-      ...prev,
-      [name]: name === 'name' ? value : Number(value)
-    }));
-  };
-
-  const handleUsersChange = (userIds) => {
-    setItem(prev => ({ ...prev, userIds }));
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onSubmit(item);
-    setItem({ name: '', price: '', quantity: '', userIds: [] });
+    setItem({
+      name: '',
+      price: '',
+      quantity: '1'
+    });
   };
 
   return (
@@ -438,52 +429,45 @@ const AddItemModal = ({ show, onHide, onSubmit, users }) => {
       <Modal.Body>
         <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-3">
-            <Form.Label>Name</Form.Label>
+            <Form.Label>Item Name</Form.Label>
             <Form.Control
               type="text"
-              name="name"
               value={item.name}
-              onChange={handleChange}
+              onChange={(e) => setItem(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Enter item name"
               required
             />
           </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label>Price</Form.Label>
-            <Form.Control
-              type="number"
-              name="price"
-              value={item.price}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
-          </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label>Quantity</Form.Label>
-            <Form.Control
-              type="number"
-              name="quantity"
-              value={item.quantity}
-              onChange={handleChange}
-              min="1"
-              required
-            />
-          </Form.Group>
-          <Form.Group className="mb-3">
-            <UserSelect
-              label="Select Users (Optional)"
-              value={item.userIds}
-              onChange={handleUsersChange}
-              options={users}
-            />
-          </Form.Group>
-          <div className="d-flex justify-content-end gap-2">
-            <Button variant="secondary" onClick={onHide}>
-              Cancel
-            </Button>
+
+          <div className="row g-3 mb-3">
+            <div className="col-8">
+              <Form.Label>Price (RM)</Form.Label>
+              <Form.Control
+                type="number"
+                value={item.price}
+                onChange={(e) => setItem(prev => ({ ...prev, price: e.target.value }))}
+                step="0.01"
+                min="0"
+                placeholder="Enter price"
+                required
+              />
+            </div>
+            <div className="col-4">
+              <Form.Label>Qty</Form.Label>
+              <Form.Control
+                type="number"
+                value={item.quantity}
+                onChange={(e) => setItem(prev => ({ ...prev, quantity: e.target.value }))}
+                min="1"
+                placeholder="Qty"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="d-flex justify-content-end">
             <Button variant="primary" type="submit">
-              Add
+              Add Item
             </Button>
           </div>
         </Form>
@@ -1408,7 +1392,6 @@ const ReceiptPage = () => {
         show={isModalOpen}
         onHide={() => setIsModalOpen(false)}
         onSubmit={handleAddItem}
-        users={group.members || []}
       />
 
       <ChangeUserModal
@@ -1529,38 +1512,42 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
         )}
         <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-3">
-            <Form.Label>Name</Form.Label>
+            <Form.Label>Item Name</Form.Label>
             <Form.Control
               type="text"
-              name="name"
               value={item.name}
-              onChange={handleChange}
+              onChange={(e) => setItem(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Enter item name"
               required
             />
           </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label>Price</Form.Label>
-            <Form.Control
-              type="number"
-              name="price"
-              value={item.price}
-              onChange={handleChange}
-              step="0.01"
-              min="0"
-              required
-            />
-          </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label>Quantity</Form.Label>
-            <Form.Control
-              type="number"
-              name="quantity"
-              value={item.quantity}
-              onChange={handleChange}
-              min="1"
-              required
-            />
-          </Form.Group>
+
+          <div className="row g-3 mb-3">
+            <div className="col-8">
+              <Form.Label>Price (RM)</Form.Label>
+              <Form.Control
+                type="number"
+                value={item.price}
+                onChange={(e) => setItem(prev => ({ ...prev, price: e.target.value }))}
+                step="0.01"
+                min="0"
+                placeholder="Enter price"
+                required
+              />
+            </div>
+            <div className="col-4">
+              <Form.Label>Qty</Form.Label>
+              <Form.Control
+                type="number"
+                value={item.quantity}
+                onChange={(e) => setItem(prev => ({ ...prev, quantity: e.target.value }))}
+                min="1"
+                placeholder="Qty"
+                required
+              />
+            </div>
+          </div>
+
           <Form.Group className="mb-3">
             <UserSelect
               label="Consumed By (Optional)"

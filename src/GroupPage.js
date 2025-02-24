@@ -1227,7 +1227,7 @@ const GroupPage = () => {
               <Button variant="primary" type="submit">
                 Create
               </Button>
-            </div>
+    </div>
           </Form>
         </Modal.Body>
       </Modal>
