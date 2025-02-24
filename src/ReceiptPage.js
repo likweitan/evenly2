@@ -862,15 +862,13 @@ const UserSummary = ({ users, items, receipt, receiptId }) => {
   );
 };
 
-const ReceiptSettingsModal = ({ show, onHide, onSubmit, onDelete, initialData, users }) => {
+const ReceiptSettingsModal = ({ show, onHide, initialData, users, onDelete, receiptId }) => {
   const [settings, setSettings] = useState({
     name: '',
     paidTo: '',
     sst: '',
     serviceCharge: ''
   });
-
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -883,129 +881,94 @@ const ReceiptSettingsModal = ({ show, onHide, onSubmit, onDelete, initialData, u
     }
   }, [initialData]);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit(settings);
-  };
+  const handleSettingChange = async (field, value) => {
+    const newSettings = { ...settings, [field]: value };
+    setSettings(newSettings);
 
-  const handleDelete = () => {
-    setShowDeleteConfirm(false);
-    onDelete();
+    try {
+      await updateReceiptSettings(receiptId, {
+        ...newSettings,
+        sst: newSettings.sst ? Number(newSettings.sst) : null,
+        serviceCharge: newSettings.serviceCharge ? Number(newSettings.serviceCharge) : null
+      });
+    } catch (error) {
+      console.error('Failed to update settings:', error);
+      alert('Failed to update settings');
+    }
   };
 
   return (
-    <>
-      <Modal show={show} onHide={onHide} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>Receipt Settings</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form onSubmit={handleSubmit}>
-            <Form.Group className="mb-3">
-              <Form.Label>Receipt Name</Form.Label>
-              <Form.Control
-                type="text"
-                name="name"
-                value={settings.name}
-                onChange={(e) => setSettings(prev => ({ ...prev, name: e.target.value }))}
-                required
-              />
-            </Form.Group>
+    <Modal show={show} onHide={onHide} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Receipt Settings</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form>
+          <Form.Group className="mb-3">
+            <Form.Label>Receipt Name</Form.Label>
+            <Form.Control
+              type="text"
+              value={settings.name}
+              onChange={(e) => handleSettingChange('name', e.target.value)}
+              placeholder="Enter receipt name"
+            />
+          </Form.Group>
 
-            <Form.Group className="mb-3">
-              <Form.Label>Paid To</Form.Label>
-              <Form.Select
-                name="paidTo"
-                value={settings.paidTo}
-                onChange={(e) => setSettings(prev => ({ ...prev, paidTo: e.target.value }))}
-                required
-              >
-                <option value="">Select user</option>
-                {users?.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </Form.Select>
-            </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Paid To</Form.Label>
+            <Form.Select
+              value={settings.paidTo}
+              onChange={(e) => handleSettingChange('paidTo', e.target.value)}
+            >
+              <option value="">Select user</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </Form.Select>
+          </Form.Group>
 
-            <hr className="my-4" />
+          <Form.Group className="mb-3">
+            <Form.Label>SST (%)</Form.Label>
+            <Form.Control
+              type="number"
+              value={settings.sst}
+              onChange={(e) => handleSettingChange('sst', e.target.value)}
+              placeholder="Enter SST percentage"
+              step="0.1"
+              min="0"
+            />
+          </Form.Group>
 
-            <Form.Group className="mb-3">
-              <Form.Label>SST (%)</Form.Label>
-              <Form.Control
-                type="number"
-                name="sst"
-                value={settings.sst}
-                onChange={(e) => setSettings(prev => ({ ...prev, sst: e.target.value }))}
-                step="0.1"
-                min="0"
-                max="100"
-              />
-            </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Service Charge (%)</Form.Label>
+            <Form.Control
+              type="number"
+              value={settings.serviceCharge}
+              onChange={(e) => handleSettingChange('serviceCharge', e.target.value)}
+              placeholder="Enter service charge percentage"
+              step="0.1"
+              min="0"
+            />
+          </Form.Group>
 
-            <Form.Group className="mb-3">
-              <Form.Label>Service Charge (%)</Form.Label>
-              <Form.Control
-                type="number"
-                name="serviceCharge"
-                value={settings.serviceCharge}
-                onChange={(e) => setSettings(prev => ({ ...prev, serviceCharge: e.target.value }))}
-                step="0.1"
-                min="0"
-                max="100"
-              />
-            </Form.Group>
-
-            <div className="d-flex justify-content-between">
-              <Button 
-                variant="outline-danger" 
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-              >
-                <i className="bi bi-trash me-2"></i>
-                Delete Receipt
-              </Button>
-              <Button variant="primary" type="submit">
-                Save Changes
-              </Button>
-            </div>
-          </Form>
-        </Modal.Body>
-      </Modal>
-
-      {/* Delete Confirmation Modal */}
-      <Modal
-        show={showDeleteConfirm}
-        onHide={() => setShowDeleteConfirm(false)}
-        centered
-      >
-        <Modal.Header closeButton>
-          <Modal.Title className="text-danger">Delete Receipt</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <p>Are you sure you want to delete this receipt?</p>
-          <Alert variant="danger">
-            <i className="bi bi-exclamation-triangle-fill me-2"></i>
-            This action cannot be undone. All items and data in this receipt will be permanently deleted.
-          </Alert>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button 
-            variant="secondary" 
-            onClick={() => setShowDeleteConfirm(false)}
-          >
-            Cancel
-          </Button>
-          <Button 
-            variant="danger" 
-            onClick={handleDelete}
-          >
-            Delete Receipt
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </>
+          <div className="d-flex justify-content-between">
+            <Button 
+              variant="outline-danger" 
+              onClick={() => {
+                if (window.confirm('Are you sure you want to delete this receipt?')) {
+                  onDelete(receiptId);
+                }
+              }}
+            >
+              <i className="bi bi-trash me-2"></i>
+              Delete Receipt
+            </Button>
+          </div>
+        </Form>
+      </Modal.Body>
+    </Modal>
   );
 };
 
@@ -1464,8 +1427,6 @@ const ReceiptPage = () => {
       <ReceiptSettingsModal
         show={isTaxModalOpen}
         onHide={() => setIsTaxModalOpen(false)}
-        onSubmit={handleSettingsUpdate}
-        onDelete={handleDeleteReceipt}
         initialData={{
           name: receipt.name,
           paidTo: receipt.paidTo,
@@ -1473,6 +1434,8 @@ const ReceiptPage = () => {
           serviceCharge: receipt.serviceCharge || ''
         }}
         users={group.members || []}
+        onDelete={handleDeleteReceipt}
+        receiptId={receiptId}
       />
 
       <EditItemModal

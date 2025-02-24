@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db } from './firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { createReceipt, getGroupReceipts, getGroup, addMemberToGroup, updateMember, deleteMember, deleteReceipt, deleteGroup, addItemToReceipt, updateReceiptTaxes } from './firebaseUtils';
+import { createReceipt, getGroupReceipts, getGroup, addMemberToGroup, updateMember, deleteMember, deleteReceipt, deleteGroup, addItemToReceipt, updateReceiptTaxes, updateAllReceiptItems } from './firebaseUtils';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Container, 
@@ -205,7 +205,7 @@ const AddReceiptModal = ({ isOpen, onClose, onSubmit }) => {
   );
 };
 
-const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 'add' }) => {
+const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 'add', onDelete, receipts, setReceipts, groupId }) => {
   const [userName, setUserName] = useState('');
 
   useEffect(() => {
@@ -213,6 +213,81 @@ const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 
       setUserName(initialData.name);
     }
   }, [initialData]);
+
+  // Add debounced update function
+  const handleNameChange = async (newName) => {
+    setUserName(newName);
+    if (mode === 'edit' && initialData.id) {
+      try {
+        await updateMember(groupId, initialData.id, { name: newName });
+      } catch (error) {
+        console.error('Failed to update user name:', error);
+        alert('Failed to update user name');
+      }
+    }
+  };
+
+  // Get all items for this user
+  const getUserItems = () => {
+    // Check if we have valid initialData and we're in edit mode
+    if (mode !== 'edit' || !initialData || !initialData.id) return [];
+
+    const items = [];
+    receipts.forEach(receipt => {
+      receipt.items?.forEach((item, index) => {
+        if (item.userIds && item.userIds.includes(initialData.id)) {
+          items.push({
+            ...item,
+            receiptName: receipt.name,
+            receiptId: receipt.id,
+            itemIndex: index,
+            isPaid: item.paidByIds && item.paidByIds.includes(initialData.id)
+          });
+        }
+      });
+    });
+    return items;
+  };
+
+  const handlePaymentToggle = async (receiptId, itemIndex, currentPaidStatus) => {
+    try {
+      // Create a copy of all receipts
+      const updatedReceipts = receipts.map(receipt => {
+        if (receipt.id === receiptId) {
+          const updatedItems = [...receipt.items];
+          const item = { ...updatedItems[itemIndex] };
+          
+          let paidByIds = new Set(item.paidByIds || []);
+          if (currentPaidStatus) {
+            paidByIds.delete(initialData.id);
+          } else {
+            paidByIds.add(initialData.id);
+          }
+          
+          item.paidByIds = Array.from(paidByIds);
+          updatedItems[itemIndex] = item;
+
+          return {
+            ...receipt,
+            items: updatedItems
+          };
+        }
+        return receipt;
+      });
+
+      // Update Firebase
+      const receipt = updatedReceipts.find(r => r.id === receiptId);
+      await updateAllReceiptItems(receiptId, receipt.items);
+
+      // Update local state
+      setReceipts(updatedReceipts);
+    } catch (error) {
+      console.error('Failed to update payment status:', error);
+      alert('Failed to update payment status');
+    }
+  };
+
+  const userItems = getUserItems();
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -223,38 +298,106 @@ const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 
   };
 
   return (
-    <Modal show={show} onHide={onHide} centered>
+    <Modal show={show} onHide={onHide} centered size="lg">
       <Modal.Header closeButton>
         <Modal.Title>{mode === 'add' ? 'Add New User' : 'Edit User'}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <Form onSubmit={handleSubmit}>
-          <Form.Group className="mb-3">
+        <Form>
+          <Form.Group className="mb-4">
             <Form.Label>User Name</Form.Label>
             <Form.Control
               type="text"
               value={userName}
-              onChange={(e) => setUserName(e.target.value)}
+              onChange={(e) => handleNameChange(e.target.value)}
               placeholder="Enter user name"
               required
             />
           </Form.Group>
-          <div className="d-flex justify-content-end gap-2">
-            <Button 
-              variant="secondary" 
-              onClick={() => {
-                onHide();
-                if (mode === 'add') {
-                  setUserName('');
-                }
-              }}
-            >
-              取消
-            </Button>
-            <Button variant="primary" type="submit">
-              {mode === 'add' ? 'Add' : 'Save'}
-            </Button>
-          </div>
+
+          {mode === 'edit' && userItems.length > 0 && (
+            <div className="mt-4">
+              <h6 className="mb-3">Items Consumed</h6>
+              {/* Group items by receipt */}
+              {Object.entries(
+                userItems.reduce((acc, item) => {
+                  if (!acc[item.receiptId]) {
+                    acc[item.receiptId] = {
+                      name: item.receiptName,
+                      items: []
+                    };
+                  }
+                  acc[item.receiptId].items.push(item);
+                  return acc;
+                }, {})
+              ).map(([receiptId, receipt]) => (
+                <div key={receiptId} className="mb-4">
+                  <div className="d-flex align-items-center mb-2">
+                    <Form.Check
+                      type="checkbox"
+                      className="me-2"
+                      checked={receipt.items.every(item => item.isPaid)}
+                      onChange={(e) => {
+                        // Handle bulk toggle for this receipt
+                        const shouldMarkAsPaid = !receipt.items.every(item => item.isPaid);
+                        receipt.items.forEach(item => {
+                          handlePaymentToggle(
+                            item.receiptId,
+                            item.itemIndex,
+                            !shouldMarkAsPaid  // Invert the current status
+                          );
+                        });
+                      }}
+                    />
+                    <h6 className="mb-0 text-primary">{receipt.name}</h6>
+                  </div>
+                  <div className="ms-4">
+                    {receipt.items.map((item, index) => {
+                      const consumersCount = (item.userIds || []).length;
+                      const perPersonCost = (item.price * item.quantity) / consumersCount;
+                      
+                      return (
+                        <div 
+                          key={index} 
+                          className="d-flex justify-content-between align-items-center py-2 border-bottom"
+                        >
+                          <div className="d-flex align-items-center">
+                            <Form.Check
+                              type="checkbox"
+                              checked={item.isPaid}
+                              onChange={() => handlePaymentToggle(item.receiptId, item.itemIndex, item.isPaid)}
+                              className="me-3"
+                            />
+                            <span>{item.name}</span>
+                          </div>
+                          <span className="text-muted">
+                            RM {perPersonCost.toFixed(2)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {mode === 'edit' && (
+            <div className="mt-4">
+              <Button 
+                variant="outline-danger" 
+                className="w-100"
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to delete this user?')) {
+                    onDelete(initialData.id);
+                  }
+                }}
+              >
+                <i className="bi bi-trash me-2"></i>
+                Delete User
+              </Button>
+            </div>
+          )}
         </Form>
       </Modal.Body>
     </Modal>
@@ -475,9 +618,6 @@ const UploadReceiptModal = ({ show, onHide, onSubmit }) => {
             )}
           </div>
           <div className="d-flex justify-content-end gap-2">
-            <Button variant="secondary" onClick={handleModalHide}>
-              Cancel
-            </Button>
             <Button 
               variant="primary" 
               type="submit"
@@ -567,6 +707,48 @@ const calculatePaidPercentage = (receipts) => {
   });
 
   return totalItems ? (totalPaidItems / totalItems) * 100 : 0;
+};
+
+// Add this function to calculate total amount for a user across all receipts
+const calculateUserTotalAmount = (userId, receipts) => {
+  let totalAmount = 0;
+  
+  receipts.forEach(receipt => {
+    if (!receipt.items) return;
+
+    receipt.items.forEach(item => {
+      if (item.userIds && item.userIds.includes(userId)) {
+        // Calculate base amount for this item
+        const itemTotal = item.price * item.quantity;
+        
+        // Get number of consumers (excluding owner)
+        const consumersCount = (item.userIds || [])
+          .filter(id => id !== receipt.paidTo)
+          .length;
+        
+        // Calculate per person share
+        const perPersonShare = consumersCount > 0 ? itemTotal / consumersCount : 0;
+        
+        // Calculate total with taxes for this person's share
+        let perPersonTotal = perPersonShare;
+        if (receipt.sst) {
+          perPersonTotal += perPersonShare * (receipt.sst / 100);
+        }
+        if (receipt.serviceCharge) {
+          perPersonTotal += perPersonShare * (receipt.serviceCharge / 100);
+        }
+
+        // Deduct if this person has paid for their share
+        if (item.paidByIds && item.paidByIds.includes(userId)) {
+          perPersonTotal = 0;
+        }
+
+        totalAmount += perPersonTotal;
+      }
+    });
+  });
+
+  return totalAmount;
 };
 
 const GroupPage = () => {
@@ -729,6 +911,58 @@ const GroupPage = () => {
     } catch (error) {
       console.error('Failed to upload receipt:', error);
       alert('Failed to upload receipt');
+    }
+  };
+
+  // Add this function to handle item click
+  const handleUserRowClick = (member) => {
+    openEditUserModal(member);
+  };
+
+  const handleBulkUserPayment = async (userId) => {
+    if (!window.confirm('This will mark all items consumed by this user as paid. This action cannot be undone. Continue?')) {
+      return;
+    }
+
+    try {
+      // Create a copy of receipts to update locally
+      const updatedReceipts = receipts.map(receipt => {
+        if (!receipt.items) return receipt;
+
+        const updatedItems = receipt.items.map(item => {
+          // Only update items where the user is a consumer
+          if (item.userIds && item.userIds.includes(userId)) {
+            const paidByIds = new Set(item.paidByIds || []);
+            paidByIds.add(userId);
+            return {
+              ...item,
+              paidByIds: Array.from(paidByIds)
+            };
+          }
+          return item;
+        });
+
+        // Return updated receipt
+        return {
+          ...receipt,
+          items: updatedItems
+        };
+      });
+
+      // Update Firebase for each modified receipt
+      for (const receipt of updatedReceipts) {
+        const originalReceipt = receipts.find(r => r.id === receipt.id);
+        if (JSON.stringify(receipt.items) !== JSON.stringify(originalReceipt.items)) {
+          await updateAllReceiptItems(receipt.id, receipt.items);
+        }
+      }
+
+      // Update local state immediately
+      setReceipts(updatedReceipts);
+
+    } catch (error) {
+      console.error('Failed to update payments:', error);
+      alert('Failed to update payments');
     }
   };
 
@@ -895,44 +1129,59 @@ const GroupPage = () => {
             <thead>
               <tr>
                 <th>User Name</th>
-                <th style={{ width: '200px' }}>Actions</th>
+                <th>Total Owed</th>
+                <th style={{ width: '150px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {!group.members || group.members.length === 0 ? (
                 <tr>
-                  <td colSpan="2" className="text-center">No users</td>
+                  <td colSpan="3" className="text-center">No users</td>
                 </tr>
               ) : (
-                group.members.map((member) => (
-                  <tr key={member.id}>
-                    <td>{member.name}</td>
-                    <td>
-                      <div className="d-flex gap-2">
-                        <Button
-                          variant="outline-primary"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditUserModal(member);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline-danger"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteUser(member.id);
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                group.members.map((member) => {
+                  const totalOwed = calculateUserTotalAmount(member.id, receipts);
+                  
+                  return (
+                    <tr 
+                      key={member.id} 
+                      onClick={() => handleUserRowClick(member)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{member.name}</td>
+                      <td>
+                        <Badge bg={totalOwed > 0 ? "warning" : "success"}>
+                          RM <CountUp
+                            end={totalOwed}
+                            decimals={2}
+                            duration={0.75}
+                          />
+                        </Badge>
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        {totalOwed > 0 ? (
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            className="w-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleBulkUserPayment(member.id);
+                            }}
+                          >
+                            <i className="bi bi-check-circle me-2"></i>
+                            Mark All Paid
+                          </Button>
+                        ) : (
+                          <div className="text-success d-flex align-items-center justify-content-center">
+                            <i className="bi bi-emoji-smile me-2"></i>
+                            Thank you for paying!
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </Table>
@@ -975,9 +1224,6 @@ const GroupPage = () => {
               </Form.Select>
             </Form.Group>
             <div className="d-flex justify-content-end gap-2">
-              <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-                Cancel
-              </Button>
               <Button variant="primary" type="submit">
                 Create
               </Button>
@@ -1001,6 +1247,10 @@ const GroupPage = () => {
         onSubmit={userModalMode === 'add' ? handleAddUser : handleEditUser}
         initialData={selectedUser}
         mode={userModalMode}
+        onDelete={handleDeleteUser}
+        receipts={receipts}
+        setReceipts={setReceipts}
+        groupId={groupId}
       />
 
       <DeleteGroupModal
