@@ -205,7 +205,7 @@ const AddReceiptModal = ({ isOpen, onClose, onSubmit }) => {
   );
 };
 
-const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 'add', onDelete, receipts, setReceipts, groupId }) => {
+const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 'add', onDelete, receipts, setReceipts, groupId, group }) => {
   const [userName, setUserName] = useState('');
 
   useEffect(() => {
@@ -214,7 +214,6 @@ const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 
     }
   }, [initialData]);
 
-  // Add debounced update function
   const handleNameChange = async (newName) => {
     setUserName(newName);
     if (mode === 'edit' && initialData.id) {
@@ -227,68 +226,6 @@ const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 
     }
   };
 
-  // Get all items for this user
-  const getUserItems = () => {
-    // Check if we have valid initialData and we're in edit mode
-    if (mode !== 'edit' || !initialData || !initialData.id) return [];
-
-    const items = [];
-    receipts.forEach(receipt => {
-      receipt.items?.forEach((item, index) => {
-        if (item.userIds && item.userIds.includes(initialData.id)) {
-          items.push({
-            ...item,
-            receiptName: receipt.name,
-            receiptId: receipt.id,
-            itemIndex: index,
-            isPaid: item.paidByIds && item.paidByIds.includes(initialData.id)
-          });
-        }
-      });
-    });
-    return items;
-  };
-
-  const handlePaymentToggle = async (receiptId, itemIndex, currentPaidStatus) => {
-    try {
-      // Create a copy of all receipts
-      const updatedReceipts = receipts.map(receipt => {
-        if (receipt.id === receiptId) {
-          const updatedItems = [...receipt.items];
-          const item = { ...updatedItems[itemIndex] };
-          
-          let paidByIds = new Set(item.paidByIds || []);
-          if (currentPaidStatus) {
-            paidByIds.delete(initialData.id);
-          } else {
-            paidByIds.add(initialData.id);
-          }
-          
-          item.paidByIds = Array.from(paidByIds);
-          updatedItems[itemIndex] = item;
-
-          return {
-            ...receipt,
-            items: updatedItems
-          };
-        }
-        return receipt;
-      });
-
-      // Update Firebase
-      const receipt = updatedReceipts.find(r => r.id === receiptId);
-      await updateAllReceiptItems(receiptId, receipt.items);
-
-      // Update local state
-      setReceipts(updatedReceipts);
-    } catch (error) {
-      console.error('Failed to update payment status:', error);
-      alert('Failed to update payment status');
-    }
-  };
-
-  const userItems = getUserItems();
-
   const handleSubmit = (e) => {
     e.preventDefault();
     onSubmit({ name: userName });
@@ -297,13 +234,111 @@ const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 
     }
   };
 
+  const calculatePaymentDetails = () => {
+    if (mode !== 'edit' || !initialData || !initialData.id) return [];
+
+    const payments = {};
+
+    receipts.forEach(receipt => {
+      // Skip if receipt has no items
+      if (!receipt.items) return;
+
+      // Get the owner of this receipt
+      const receiptOwner = receipt.paidTo;
+      if (!receiptOwner) return;
+
+      receipt.items.forEach(item => {
+        // Skip if user is not a consumer or has already paid
+        if (!item.userIds?.includes(initialData.id)) return;
+        if (item.paidByIds?.includes(initialData.id)) return;
+
+        const itemTotal = item.price * item.quantity;
+        const perPersonShare = itemTotal / item.userIds.length;
+
+        // Calculate share with taxes
+        let shareWithTax = perPersonShare;
+        if (receipt.sst) {
+          shareWithTax += perPersonShare * (receipt.sst / 100);
+        }
+        if (receipt.serviceCharge) {
+          shareWithTax += perPersonShare * (receipt.serviceCharge / 100);
+        }
+
+        // Add to owner's total
+        if (!payments[receiptOwner]) {
+          payments[receiptOwner] = {
+            amount: 0,
+            receiptNames: new Set()
+          };
+        }
+        payments[receiptOwner].amount += shareWithTax;
+        payments[receiptOwner].receiptNames.add(receipt.name);
+      });
+    });
+
+    return Object.entries(payments).map(([ownerId, data]) => ({
+      ownerId,
+      amount: data.amount,
+      receiptNames: Array.from(data.receiptNames)
+    }));
+  };
+
+  const paymentDetails = calculatePaymentDetails();
+
+  const handleMarkPaid = async (ownerId, receiptNames) => {
+    try {
+      const timestamp = new Date().toISOString();
+      
+      // Create a copy of receipts to update
+      const updatedReceipts = receipts.map(receipt => {
+        // Only update receipts in the payment record
+        if (!receiptNames.includes(receipt.name)) return receipt;
+
+        const updatedItems = receipt.items?.map(item => {
+          // Only update items where the user is a consumer and hasn't paid
+          if (item.userIds?.includes(initialData.id) && !item.paidByIds?.includes(initialData.id)) {
+            return {
+              ...item,
+              paidByIds: [...(item.paidByIds || []), initialData.id],
+              // Add or update paidTimestamp object
+              paidTimestamp: {
+                ...(item.paidTimestamp || {}),
+                [initialData.id]: timestamp
+              }
+            };
+          }
+          return item;
+        });
+
+        return {
+          ...receipt,
+          items: updatedItems
+        };
+      });
+
+      // Update Firebase for each modified receipt
+      for (const receipt of updatedReceipts) {
+        const originalReceipt = receipts.find(r => r.id === receipt.id);
+        if (JSON.stringify(receipt.items) !== JSON.stringify(originalReceipt.items)) {
+          await updateAllReceiptItems(receipt.id, receipt.items);
+        }
+      }
+
+      // Update local state
+      setReceipts(updatedReceipts);
+    } catch (error) {
+      console.error('Failed to mark as paid:', error);
+      alert('Failed to mark as paid');
+    }
+  };
+
   return (
-    <Modal show={show} onHide={onHide} centered size="lg">
+    <Modal show={show} onHide={onHide} centered>
       <Modal.Header closeButton>
         <Modal.Title>{mode === 'add' ? 'Add New User' : 'Edit User'}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <Form>
+        <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-4">
             <Form.Label>User Name</Form.Label>
             <Form.Control
@@ -315,89 +350,64 @@ const UserModal = ({ show, onHide, onSubmit, initialData = { name: '' }, mode = 
             />
           </Form.Group>
 
-          {mode === 'edit' && userItems.length > 0 && (
+          {mode === 'edit' && paymentDetails.length > 0 && (
             <div className="mt-4">
-              <h6 className="mb-3">Items Consumed</h6>
-              {/* Group items by receipt */}
-              {Object.entries(
-                userItems.reduce((acc, item) => {
-                  if (!acc[item.receiptId]) {
-                    acc[item.receiptId] = {
-                      name: item.receiptName,
-                      items: []
-                    };
-                  }
-                  acc[item.receiptId].items.push(item);
-                  return acc;
-                }, {})
-              ).map(([receiptId, receipt]) => (
-                <div key={receiptId} className="mb-4">
-                  <div className="d-flex align-items-center mb-2">
-                    <Form.Check
-                      type="checkbox"
-                      className="me-2"
-                      checked={receipt.items.every(item => item.isPaid)}
-                      onChange={(e) => {
-                        // Handle bulk toggle for this receipt
-                        const shouldMarkAsPaid = !receipt.items.every(item => item.isPaid);
-                        receipt.items.forEach(item => {
-                          handlePaymentToggle(
-                            item.receiptId,
-                            item.itemIndex,
-                            !shouldMarkAsPaid  // Invert the current status
-                          );
-                        });
-                      }}
-                    />
-                    <h6 className="mb-0 text-primary">{receipt.name}</h6>
-                  </div>
-                  <div className="ms-4">
-                    {receipt.items.map((item, index) => {
-                      const consumersCount = (item.userIds || []).length;
-                      const perPersonCost = (item.price * item.quantity) / consumersCount;
-                      
-                      return (
-                        <div 
-                          key={index} 
-                          className="d-flex justify-content-between align-items-center py-2 border-bottom"
-                        >
-                          <div className="d-flex align-items-center">
-                            <Form.Check
-                              type="checkbox"
-                              checked={item.isPaid}
-                              onChange={() => handlePaymentToggle(item.receiptId, item.itemIndex, item.isPaid)}
-                              className="me-3"
-                            />
-                            <span>{item.name}</span>
-                          </div>
-                          <span className="text-muted">
-                            RM {perPersonCost.toFixed(2)}
-                          </span>
+              <h6 className="mb-3">Payment Summary</h6>
+              <div className="list-group">
+                {paymentDetails.map(({ ownerId, amount, receiptNames }) => {
+                  const ownerName = group.members.find(m => m.id === ownerId)?.name;
+                  
+                  return (
+                    <div key={ownerId} className="list-group-item">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                          <i className="bi bi-arrow-right me-2 text-primary"></i>
+                          Pay to <strong>{ownerName}</strong>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                        <div className="d-flex align-items-center gap-2">
+                          <Badge bg="primary">
+                            RM {amount.toFixed(2)}
+                          </Badge>
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() => handleMarkPaid(ownerId, receiptNames)}
+                            title="Mark all items as paid"
+                          >
+                            <i className="bi bi-check-circle"></i>
+                          </Button>
+                        </div>
+                      </div>
+                      <small className="text-muted d-block">
+                        From receipts: {receiptNames.join(', ')}
+                      </small>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
-          {mode === 'edit' && (
-            <div className="mt-4">
-              <Button 
-                variant="outline-danger" 
-                className="w-100"
-                onClick={() => {
-                  if (window.confirm('Are you sure you want to delete this user?')) {
-                    onDelete(initialData.id);
-                  }
-                }}
+          <div className="d-flex justify-content-between mt-4">
+            {mode === 'edit' ? (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={onDelete}
+                type="button"
               >
-                <i className="bi bi-trash me-2"></i>
                 Delete User
               </Button>
-            </div>
-          )}
+            ) : (
+              <div />
+            )}
+            <Button 
+              variant="primary" 
+              type="submit"
+            >
+              {mode === 'add' ? 'Add User' : 'Save Changes'}
+            </Button>
+          </div>
         </Form>
       </Modal.Body>
     </Modal>
@@ -784,6 +794,410 @@ const addToRecentGroups = (groupId, groupName) => {
   }
 };
 
+const PaymentSummaryTab = ({ group, receipts, setReceipts }) => {
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+
+  const handleMarkAllPaid = async (payerId) => {
+    if (!window.confirm('Are you sure you want to mark all items as paid for this user?')) return;
+
+    try {
+      const timestamp = new Date().toISOString();
+      
+      // Create a copy of receipts to update
+      const updatedReceipts = receipts.map(receipt => {
+        const updatedItems = receipt.items?.map(item => {
+          // Only update items where the user is a consumer and hasn't paid
+          if (item.userIds?.includes(payerId) && !item.paidByIds?.includes(payerId)) {
+            return {
+              ...item,
+              paidByIds: [...(item.paidByIds || []), payerId],
+              // Add or update paidTimestamp object
+              paidTimestamp: {
+                ...(item.paidTimestamp || {}),
+                [payerId]: timestamp
+              }
+            };
+          }
+          return item;
+        });
+
+        return {
+          ...receipt,
+          items: updatedItems
+        };
+      });
+
+      // Update Firebase for each modified receipt
+      for (const receipt of updatedReceipts) {
+        const originalReceipt = receipts.find(r => r.id === receipt.id);
+        if (JSON.stringify(receipt.items) !== JSON.stringify(originalReceipt.items)) {
+          await updateAllReceiptItems(receipt.id, receipt.items);
+        }
+      }
+
+      // Update local state
+      setReceipts(updatedReceipts);
+    } catch (error) {
+      console.error('Failed to mark all as paid:', error);
+      alert('Failed to mark all as paid');
+    }
+  };
+
+  // Group all payments by payer
+  const calculatePayments = () => {
+    const payerGroups = {};
+
+    receipts.forEach(receipt => {
+      receipt.items?.forEach(item => {
+        // Skip if user is the owner of this receipt
+        if (receipt.paidTo === item.userIds) return;
+
+        const itemTotal = item.price * item.quantity;
+        // Calculate share only among non-owner consumers
+        const nonOwnerConsumers = item.userIds?.filter(id => id !== receipt.paidTo) || [];
+        const perPersonShare = itemTotal / (nonOwnerConsumers.length || 1);
+
+        // Calculate share with taxes
+        let shareWithTax = perPersonShare;
+        if (receipt.sst) {
+          shareWithTax += perPersonShare * (receipt.sst / 100);
+        }
+        if (receipt.serviceCharge) {
+          shareWithTax += perPersonShare * (receipt.serviceCharge / 100);
+        }
+
+        // For each consumer who hasn't paid (excluding owner)
+        nonOwnerConsumers.forEach(userId => {
+          if (!item.paidByIds?.includes(userId)) {
+            if (!payerGroups[userId]) {
+              payerGroups[userId] = {
+                payerId: userId,
+                totalAmount: 0,
+                payments: {}
+              };
+            }
+
+            const key = receipt.paidTo;
+            if (!payerGroups[userId].payments[key]) {
+              payerGroups[userId].payments[key] = {
+                recipientId: key,
+                amount: 0,
+                items: [] // Track individual items
+              };
+            }
+
+            payerGroups[userId].payments[key].amount += shareWithTax;
+            payerGroups[userId].payments[key].items.push({
+              receiptName: receipt.name,
+              itemName: item.name,
+              price: item.price,
+              quantity: item.quantity,
+              share: shareWithTax,
+              totalConsumers: nonOwnerConsumers.length
+            });
+            payerGroups[userId].totalAmount += shareWithTax;
+          }
+        });
+      });
+    });
+
+    return Object.values(payerGroups).map(group => ({
+      ...group,
+      payments: Object.values(group.payments)
+    }));
+  };
+
+  const PaymentDetailsModal = ({ show, onHide, payment, payer, recipient }) => {
+    // Add early return if payment is null
+    if (!payment) return null;
+
+    return (
+      <Modal show={show} onHide={onHide} size="lg" centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Payment Details</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="mb-4">
+            <h6>From: <strong>{payer || 'Unknown'}</strong></h6>
+            <h6>To: <strong>{recipient || 'Unknown'}</strong></h6>
+            <h6>Total Amount: <strong>RM {payment.amount.toFixed(2)}</strong></h6>
+          </div>
+
+          <div className="table-responsive">
+            <Table hover>
+              <thead>
+                <tr>
+                  <th>Receipt</th>
+                  <th>Item</th>
+                  <th>Price</th>
+                  <th>Qty</th>
+                  <th>Split Among</th>
+                  <th>Your Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payment.items?.map((item, idx) => (
+                  <tr key={idx}>
+                    <td>{item.receiptName}</td>
+                    <td>{item.itemName}</td>
+                    <td>RM {item.price.toFixed(2)}</td>
+                    <td>{item.quantity}</td>
+                    <td>{item.totalConsumers} people</td>
+                    <td>RM {item.share.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        </Modal.Body>
+      </Modal>
+    );
+  };
+
+  const paymentGroups = calculatePayments();
+
+  return (
+    <div className="pt-3">
+      {paymentGroups.map((payerGroup) => {
+        const payer = group.members?.find(m => m.id === payerGroup.payerId)?.name;
+
+        return (
+          <Card key={payerGroup.payerId} className="mb-3">
+            <Card.Header className="d-flex justify-content-between align-items-center">
+              <h6 className="mb-0">{payer || 'Unknown User'}</h6>
+              <div className="d-flex align-items-center gap-2">
+                <Badge bg="primary">
+                  Total: RM {payerGroup.totalAmount.toFixed(2)}
+                </Badge>
+                <Button
+                  variant="outline-success"
+                  size="sm"
+                  onClick={() => handleMarkAllPaid(payerGroup.payerId)}
+                  title="Mark all as paid"
+                >
+                  <i className="bi bi-check-circle"></i>
+                </Button>
+              </div>
+            </Card.Header>
+            <Card.Body>
+              <div className="list-group">
+                {payerGroup.payments.map((payment, index) => {
+                  const recipient = group.members?.find(m => m.id === payment.recipientId)?.name;
+
+                  return (
+                    <div 
+                      key={index} 
+                      className="list-group-item" 
+                      onClick={() => {
+                        setSelectedPayment({
+                          ...payment,
+                          payerName: payer,
+                          recipientName: recipient
+                        });
+                        setShowDetailsModal(true);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <div className="d-flex justify-content-between align-items-center">
+                        <div>
+                          <i className="bi bi-arrow-right me-2 text-primary"></i>
+                          Pay to <strong>{recipient || 'Unknown User'}</strong>
+                        </div>
+                        <Badge bg="primary">
+                          RM {payment.amount.toFixed(2)}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card.Body>
+          </Card>
+        );
+      })}
+
+      {/* Only render modal if selectedPayment exists */}
+      {selectedPayment && (
+        <PaymentDetailsModal
+          show={showDetailsModal}
+          onHide={() => {
+            setShowDetailsModal(false);
+            setSelectedPayment(null);
+          }}
+          payment={selectedPayment}
+          payer={selectedPayment.payerName}
+          recipient={selectedPayment.recipientName}
+        />
+      )}
+
+      {paymentGroups.length === 0 && (
+        <div className="text-center text-muted py-4">
+          No pending payments
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PaymentHistoryTab = ({ group, receipts, setReceipts }) => {
+  const calculatePaidHistory = () => {
+    const historyMap = new Map(); // Use Map to consolidate by receipt
+
+    receipts.forEach(receipt => {
+      receipt.items?.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+        const perPersonShare = itemTotal / (item.userIds?.length || 1);
+
+        // Calculate share with taxes
+        let shareWithTax = perPersonShare;
+        if (receipt.sst) {
+          shareWithTax += perPersonShare * (receipt.sst / 100);
+        }
+        if (receipt.serviceCharge) {
+          shareWithTax += perPersonShare * (receipt.serviceCharge / 100);
+        }
+
+        // For each consumer who has paid
+        item.paidByIds?.forEach(payerId => {
+          const key = `${receipt.id}-${payerId}`; // Create unique key for receipt-payer combination
+          
+          if (!historyMap.has(key)) {
+            historyMap.set(key, {
+              payerId,
+              recipientId: receipt.paidTo,
+              receiptId: receipt.id,
+              receiptName: receipt.name,
+              amount: 0,
+              items: [],
+              // Use the latest timestamp from all items
+              timestamp: item.paidTimestamp?.[payerId] || new Date().toISOString()
+            });
+          }
+
+          const record = historyMap.get(key);
+          record.amount += shareWithTax;
+          record.items.push({
+            name: item.name,
+            share: shareWithTax,
+            timestamp: item.paidTimestamp?.[payerId]
+          });
+
+          // Update timestamp if this item was paid later
+          if (item.paidTimestamp?.[payerId] > record.timestamp) {
+            record.timestamp = item.paidTimestamp[payerId];
+          }
+        });
+      });
+    });
+
+    // Convert Map to array and sort by timestamp
+    return Array.from(historyMap.values())
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  };
+
+  const formatDateTime = (timestamp) => {
+    return new Date(timestamp).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const handleUndoPayment = async (payment) => {
+    if (!window.confirm('Are you sure you want to undo all payments for this receipt?')) return;
+
+    try {
+      const updatedReceipts = receipts.map(receipt => {
+        if (receipt.id !== payment.receiptId) return receipt;
+
+        const updatedItems = receipt.items.map(item => {
+          // Remove the payer from all items in this receipt
+          const newPaidByIds = (item.paidByIds || []).filter(id => id !== payment.payerId);
+          const newPaidTimestamp = { ...(item.paidTimestamp || {}) };
+          delete newPaidTimestamp[payment.payerId];
+
+          return {
+            ...item,
+            paidByIds: newPaidByIds,
+            paidTimestamp: newPaidTimestamp
+          };
+        });
+
+        return {
+          ...receipt,
+          items: updatedItems
+        };
+      });
+
+      const receipt = updatedReceipts.find(r => r.id === payment.receiptId);
+      await updateAllReceiptItems(payment.receiptId, receipt.items);
+      setReceipts(updatedReceipts);
+    } catch (error) {
+      console.error('Failed to undo payment:', error);
+      alert('Failed to undo payment');
+    }
+  };
+
+  const history = calculatePaidHistory();
+
+  return (
+    <div className="pt-3">
+      <div className="list-group">
+        {history.map((payment, index) => {
+          const payer = group.members.find(m => m.id === payment.payerId)?.name;
+          const recipient = group.members.find(m => m.id === payment.recipientId)?.name;
+
+          return (
+            <div key={index} className="list-group-item">
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                  <strong>{payer}</strong>
+                  <i className="bi bi-arrow-right mx-2 text-success"></i>
+                  <strong>{recipient}</strong>
+                </div>
+                <div className="d-flex align-items-center gap-2">
+                  <Badge bg="success">
+                    RM {payment.amount.toFixed(2)}
+                  </Badge>
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={() => handleUndoPayment(payment)}
+                    title="Undo all payments for this receipt"
+                  >
+                    <i className="bi bi-arrow-counterclockwise"></i>
+                  </Button>
+                </div>
+              </div>
+              <div className="d-flex justify-content-between align-items-center">
+                <div className="text-muted">
+                  <i className="bi bi-receipt me-2"></i>
+                  {payment.receiptName}
+                  <small className="ms-2 text-muted">
+                    ({payment.items.length} items)
+                  </small>
+                </div>
+                <small className="text-muted">
+                  <i className="bi bi-clock me-1"></i>
+                  {formatDateTime(payment.timestamp)}
+                </small>
+              </div>
+            </div>
+          );
+        })}
+        {history.length === 0 && (
+          <div className="text-center text-muted py-4">
+            No payment history
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const GroupPage = () => {
   const navigate = useNavigate();
   const { groupId } = useParams();
@@ -794,7 +1208,7 @@ const GroupPage = () => {
   const [userModalMode, setUserModalMode] = useState('add');
   const [selectedUser, setSelectedUser] = useState(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('receipts');
+  const [activeTab, setActiveTab] = useState('summary');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [error, setError] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -1016,14 +1430,6 @@ const GroupPage = () => {
           <h2 className="mb-2">{group?.name || 'Loading...'}</h2>
           <div className="d-flex align-items-center gap-2">
             <code className="text-muted">{groupId}</code>
-            <Button 
-              variant="outline-secondary" 
-              size="sm"
-              onClick={() => copyToClipboard(groupId)}
-              title="Copy Group ID"
-            >
-              <i className="bi bi-clipboard"></i>
-            </Button>
           </div>
         </div>
         <div className="d-flex gap-2">
@@ -1101,16 +1507,29 @@ const GroupPage = () => {
         onSelect={(k) => setActiveTab(k)}
         className="mb-4"
       >
+        <Tab eventKey="summary" title="Summary">
+          <PaymentSummaryTab 
+            group={group}
+            receipts={receipts}
+            setReceipts={setReceipts}
+          />
+        </Tab>
+
         <Tab eventKey="receipts" title="Receipts">
           <div className="d-flex justify-content-end mb-3">
-            <div className="d-flex justify-content-end mb-3 gap-2">
-              <Button variant="primary" onClick={() => setShowUploadModal(true)}>
-                <i className="bi bi-upload"></i>
-              </Button>
-              <Button variant="success" onClick={() => setIsModalOpen(true)}>
-                <i className="bi bi-plus-lg"></i>
-              </Button>
-            </div>
+            <Button 
+              variant="success"
+              onClick={() => setIsModalOpen(true)}
+              className="me-2"
+            >
+              <i className="bi bi-plus-lg"></i>
+            </Button>
+            <Button 
+              variant="outline-primary"
+              onClick={() => setShowUploadModal(true)}
+            >
+              <i className="bi bi-upload"></i>
+            </Button>
           </div>
           <Table hover responsive className="bg-white rounded shadow-sm">
             <thead>
@@ -1177,62 +1596,34 @@ const GroupPage = () => {
             <thead>
               <tr>
                 <th>User Name</th>
-                <th>Total Owed</th>
-                <th style={{ width: '150px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {!group.members || group.members.length === 0 ? (
                 <tr>
-                  <td colSpan="3" className="text-center">No users</td>
+                  <td className="text-center">No users</td>
                 </tr>
               ) : (
-                group.members.map((member) => {
-                  const totalOwed = calculateUserTotalAmount(member.id, receipts);
-                  
-                  return (
-                    <tr 
-                      key={member.id} 
-                      onClick={() => handleUserRowClick(member)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td>{member.name}</td>
-                      <td>
-                        <Badge bg={totalOwed > 0 ? "warning" : "success"}>
-                          RM <CountUp
-                            end={totalOwed}
-                            decimals={2}
-                            duration={0.75}
-                          />
-                        </Badge>
-                      </td>
-                      <td onClick={e => e.stopPropagation()}>
-                        {totalOwed > 0 ? (
-                          <Button
-                            variant="outline-success"
-                            size="sm"
-                            className="w-100"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleBulkUserPayment(member.id);
-                            }}
-                          >
-                            <i className="bi bi-check-circle me-2"></i>
-                            Mark All Paid
-                          </Button>
-                        ) : (
-                          <div className="text-success d-flex align-items-center justify-content-center">
-                            <i className="bi bi-emoji-smile me-2"></i>
-                            Thank you for paying!
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
+                group.members.map((member) => (
+                  <tr 
+                    key={member.id} 
+                    onClick={() => handleUserRowClick(member)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td>{member.name}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </Table>
+        </Tab>
+
+        <Tab eventKey="history" title="History">
+          <PaymentHistoryTab 
+            group={group}
+            receipts={receipts}
+            setReceipts={setReceipts}
+          />
         </Tab>
       </Tabs>
 
@@ -1299,6 +1690,7 @@ const GroupPage = () => {
         receipts={receipts}
         setReceipts={setReceipts}
         groupId={groupId}
+        group={group}
       />
 
       <DeleteGroupModal

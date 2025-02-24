@@ -33,6 +33,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
 import CountUp from 'react-countup';
 import AttachmentsTab from './components/AttachmentsTab';
+import Select from 'react-select';
 
 const styles = {
   container: {
@@ -578,302 +579,89 @@ const ReceiptSummary = ({ receipt, items, calculateSubtotal, calculateTaxes }) =
   );
 };
 
-const UserSummary = ({ users, items, receipt, receiptId }) => {
-  // Add state for items
-  const [localItems, setLocalItems] = useState(items);
+const UserSummary = ({ users, items, receipt }) => {
+  // Helper function to calculate user's share for an item
+  const calculateUserShare = (item, userId) => {
+    if (!item.userIds || item.userIds.length === 0) return 0;
 
-  // Update local items when props change
-  useEffect(() => {
-    setLocalItems(items);
-  }, [items]);
+    const itemTotal = item.price * item.quantity;
+    
+    // If user is not in userIds or has already paid, they don't pay
+    if (!item.userIds.includes(userId) || item.paidByIds?.includes(userId)) return 0;
 
-  const calculateUserSubtotal = (userId) => {
-    let subtotal = 0;
-    localItems.forEach(item => {
-      if (item.userIds && item.userIds.includes(userId)) {
-        const perPersonCost = (item.price * item.quantity) / item.userIds.length;
-        subtotal += perPersonCost;
-      }
-    });
-    return subtotal;
+    // Calculate per person share based on total consumers
+    const perPersonShare = itemTotal / item.userIds.length;
+
+    // Calculate taxes for per person share
+    let totalShare = perPersonShare;
+    if (receipt.sst) {
+      totalShare += perPersonShare * (receipt.sst / 100);
+    }
+    if (receipt.serviceCharge) {
+      totalShare += perPersonShare * (receipt.serviceCharge / 100);
+    }
+
+    return totalShare;
   };
 
+  // Calculate total for a user
   const calculateUserTotal = (userId) => {
-    // If this is the receipt owner (paidTo), they don't owe anything
-    if (userId === receipt.paidTo) {
-      return 0;
-    }
+    if (!receipt.items) return 0;
 
-    let total = 0;
-    localItems.forEach(item => {
-      if (item.userIds && item.userIds.includes(userId)) {
-        // Calculate base amount for this item
-        const itemTotal = item.price * item.quantity;
-        
-        // Get number of consumers (excluding owner)
-        const consumersCount = (item.userIds || [])
-          .filter(id => id !== receipt.paidTo)
-          .length;
-        
-        // Calculate per person share
-        const perPersonShare = consumersCount > 0 ? itemTotal / consumersCount : 0;
-        
-        // Calculate total with taxes for this person's share
-        let perPersonTotal = perPersonShare;
-        if (receipt.sst) {
-          perPersonTotal += perPersonShare * (receipt.sst / 100);
-        }
-        if (receipt.serviceCharge) {
-          perPersonTotal += perPersonShare * (receipt.serviceCharge / 100);
-        }
+    // Calculate total from items
+    const total = receipt.items.reduce((total, item) => {
+      return total + calculateUserShare(item, userId);
+    }, 0);
 
-        // Deduct if this person has paid for their share
-        if (item.paidByIds && item.paidByIds.includes(userId)) {
-          perPersonTotal = 0;
-        }
-
-        total += perPersonTotal;
-      }
-    });
-
-    return total;
-  };
-
-  const getUserItems = (userId) => {
-    return localItems.filter(item => 
-      item.userIds && item.userIds.includes(userId)
-    ).map(item => ({
-      ...item,
-      perPersonCost: (item.price * item.quantity) / item.userIds.length
-    }));
-  };
-
-  const calculateUserPayments = (userId) => {
-    // If this is the receipt owner (paidTo), they paid the total amount
-    if (userId === receipt.paidTo) {
-      const totalAmount = localItems.reduce((sum, item) => {
-        return sum + (item.price * item.quantity);
-      }, 0);
-
-      let total = totalAmount;
-      if (receipt.sst) {
-        total += totalAmount * (receipt.sst / 100);
-      }
-      if (receipt.serviceCharge) {
-        total += totalAmount * (receipt.serviceCharge / 100);
-      }
-      return total;
-    }
-
-    // For non-owners, calculate their paid amount
-    let totalPaid = 0;
-    localItems.forEach(item => {
-      if (item.paidByIds && item.paidByIds.includes(userId)) {
-        // Calculate base amount for this item
-        const itemTotal = item.price * item.quantity;
-        
-        // Get number of consumers (excluding owner)
-        const consumersCount = (item.userIds || [])
-          .filter(id => id !== receipt.paidTo)
-          .length;
-        
-        // Calculate per person share
-        const perPersonShare = consumersCount > 0 ? itemTotal / consumersCount : 0;
-        
-        // Calculate total with taxes for this person's share
-        let perPersonTotal = perPersonShare;
-        if (receipt.sst) {
-          perPersonTotal += perPersonShare * (receipt.sst / 100);
-        }
-        if (receipt.serviceCharge) {
-          perPersonTotal += perPersonShare * (receipt.serviceCharge / 100);
-        }
-
-        totalPaid += perPersonTotal;
-      }
-    });
-
-    return totalPaid;
-  };
-
-  const handleBulkPaymentUpdate = async (userId, shouldMarkAsPaid, receiptItems = null) => {
-    try {
-      // If receiptItems is provided, only update those items
-      const itemsToUpdate = receiptItems || localItems;
-      
-      // Create a copy of all items with updates
-      const updatedItems = localItems.map(item => {
-        // Check if this item should be updated
-        if (itemsToUpdate.find(updateItem => updateItem === item) && 
-            item.userIds && 
-            item.userIds.includes(userId)) {
-          let paidByIds = new Set(item.paidByIds || []);
-          
-          if (shouldMarkAsPaid) {
-            paidByIds.add(userId);
-          } else {
-            paidByIds.delete(userId);
-          }
-          
-          return {
-            ...item,
-            paidByIds: Array.from(paidByIds)
-          };
-        }
-        return item;
-      });
-
-      // Update local state immediately
-      setLocalItems(updatedItems);
-
-      // Update Firebase
-      await updateAllReceiptItems(receiptId, updatedItems);
-    } catch (error) {
-      console.error('Failed to update payment status:', error);
-      alert('Failed to update payment status');
-      // Revert local state on error
-      setLocalItems(items);
-    }
+    return {
+      total
+    };
   };
 
   return (
-    <>
+    <div>
       {users.map(user => {
-        const userItems = getUserItems(user.id);
-        const subtotal = calculateUserSubtotal(user.id);
-        const total = calculateUserTotal(user.id);
-        const paid = calculateUserPayments(user.id);
-        
-        const shouldShow = userItems.length > 0 || user.id === receipt.paidTo;
-        if (!shouldShow) return null;
-
-        // Calculate if all consumed items are paid
-        const isAllPaid = userItems.every(item => 
-          item.paidByIds && item.paidByIds.includes(user.id)
-        );
+        const amounts = calculateUserTotal(user.id);
+        if (amounts.total === 0) return null;
 
         return (
-          <div key={user.id} className="mb-4">
-            <div className="bg-white rounded shadow-sm">
-              <div className="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-                <div className="d-flex align-items-center gap-2">
-                  <Form.Check
-                    type="checkbox"
-                    checked={isAllPaid}
-                    onChange={(e) => {
-                      // Get all items for this user in this receipt
-                      const userItems = getUserItems(user.id);
-                      handleBulkPaymentUpdate(user.id, !isAllPaid, userItems);
-                    }}
-                    label=""
-                    className="me-2"
-                  />
-                  <span className="fw-bold">
-                    {user.name}
-                    {user.id === receipt.paidTo && (
-                      <Badge bg="primary" className="ms-2">Owner</Badge>
-                    )}
-                  </span>
-                </div>
-                <div className="text-end">
-                  <div className="text-muted small">
-                    Paid: RM <CountUp
-                      end={paid}
-                      decimals={2}
-                      duration={0.75}
-                    />
-                  </div>
-                  <div className="text-primary fw-bold">
-                    Owed: RM <CountUp
-                      end={total}
-                      decimals={2}
-                      duration={0.75}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="p-3">
-                {userItems.map((item, index) => {
-                  const splitCount = item.userIds
-                    .filter(id => id !== receipt.paidTo)
-                    .length;
+          <Card key={user.id} className="mb-3">
+            <Card.Header className="d-flex justify-content-between align-items-center">
+              <h6 className="mb-0">{user.name}</h6>
+              <strong className="text-primary">
+                RM {amounts.total.toFixed(2)}
+              </strong>
+            </Card.Header>
+            <Card.Body>
+              {receipt.items?.map((item, index) => {
+                const share = calculateUserShare(item, user.id);
+                if (share === 0) return null;
 
-                  return (
-                    <div key={index} className="d-flex justify-content-between align-items-center mb-2">
-                      <div>
-                        <span>{item.name}</span>
-                        {splitCount > 1 && (
-                          <small className="text-muted ms-2">
-                            (Split by {splitCount} persons)
-                          </small>
-                        )}
-                      </div>
-                      <span>
-                        RM <CountUp
-                          end={item.perPersonCost}
-                          decimals={2}
-                          duration={0.5}
-                        />
-                      </span>
-                    </div>
-                  );
-                })}
+                const totalConsumers = item.userIds.length;
+                const paidUsers = item.paidByIds?.length || 0;
 
-                {/* Always show subtotal and taxes if there are items */}
-                {userItems.length > 0 && (
-                  <div className="mt-3 pt-3 border-top">
-                    <div className="d-flex justify-content-between text-muted small mb-1">
-                      <span>Subtotal</span>
-                      <span>
-                        RM <CountUp
-                          end={subtotal}
-                          decimals={2}
-                          duration={0.75}
-                        />
-                      </span>
+                return (
+                  <div key={index} className="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <span>{item.name}</span>
+                      <small className="text-muted ms-2">
+                        (RM {item.price.toFixed(2)} × {item.quantity})
+                      </small>
                     </div>
-                    {receipt.sst && (
-                      <div className="d-flex justify-content-between text-muted small mb-1">
-                        <span>SST ({receipt.sst}%)</span>
-                        <span>
-                          RM <CountUp
-                            end={subtotal * receipt.sst / 100}
-                            decimals={2}
-                            duration={0.75}
-                          />
-                        </span>
-                      </div>
-                    )}
-                    {receipt.serviceCharge && (
-                      <div className="d-flex justify-content-between text-muted small mb-1">
-                        <span>Service Charge ({receipt.serviceCharge}%)</span>
-                        <span>
-                          RM <CountUp
-                            end={subtotal * receipt.serviceCharge / 100}
-                            decimals={2}
-                            duration={0.75}
-                          />
-                        </span>
-                      </div>
-                    )}
-                    <div className="d-flex justify-content-between fw-bold small mt-2">
-                      <span>Total</span>
-                      <span>
-                        RM <CountUp
-                          end={user.id === receipt.paidTo ? subtotal : total}
-                          decimals={2}
-                          duration={1}
-                        />
-                      </span>
+                    <div className="text-end">
+                      <div>RM {share.toFixed(2)}</div>
+                      <small className="text-muted">
+                        {paidUsers} paid of {totalConsumers} consumers
+                      </small>
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
+                );
+              })}
+            </Card.Body>
+          </Card>
         );
       })}
-    </>
+    </div>
   );
 };
 
@@ -1186,6 +974,12 @@ const InsightsTab = ({ receipt, users, items, calculateTaxes, calculateSubtotal 
   );
 };
 
+// Add this helper function at the top level
+const checkReceiptReadiness = (items) => {
+  if (!items || items.length === 0) return false;
+  return items.every(item => item.userIds && item.userIds.length > 0);
+};
+
 const ReceiptPage = () => {
   const { groupId, receiptId } = useParams();
   const [receipt, setReceipt] = useState(null);
@@ -1391,7 +1185,15 @@ const ReceiptPage = () => {
 
       <div className="d-flex justify-content-between align-items-start mb-4">
         <div>
-          <h2 className="mb-2">{receipt.name}</h2>
+          <div className="d-flex align-items-center gap-2 mb-2">
+            <h2 className="mb-0">{receipt.name}</h2>
+            {checkReceiptReadiness(receipt.items) && (
+              <Badge bg="success" className="d-flex align-items-center">
+                <i className="bi bi-check-circle me-1"></i>
+                Ready
+              </Badge>
+            )}
+          </div>
           <div className="text-muted mb-2">
             Created: {formatDate(receipt.createdAt)}
           </div>
@@ -1464,21 +1266,24 @@ const ReceiptPage = () => {
                   </tr>
                 ) : (
                   receipt.items.map((item, index) => {
-                    // Get consumed by IDs
+                    // Get consumed by IDs and paid by IDs
                     const consumedByIds = item.userIds || [];
-                    
-                    // Get paid by IDs, excluding the receipt owner
                     const paidByIds = item.paidByIds || [];
                     
-                    // Filter out receipt owner from both arrays for comparison
+                    // Check if item has any split entries (excluding owner)
                     const consumersExcludingOwner = consumedByIds.filter(id => id !== receipt.paidTo);
-                    const payersExcludingOwner = paidByIds.filter(id => id !== receipt.paidTo);
-                    
-                    // Check if arrays match after excluding owner
-                    const isPaid = consumersExcludingOwner.length > 0 && 
-                                   payersExcludingOwner.length > 0 && 
-                                   consumersExcludingOwner.length === payersExcludingOwner.length && 
-                                   consumersExcludingOwner.every(id => payersExcludingOwner.includes(id));
+                    const hasSplitEntries = consumersExcludingOwner.length > 0;
+
+                    // Check if all non-owner consumers have paid
+                    const isFullyPaid = hasSplitEntries && 
+                      consumersExcludingOwner.every(id => paidByIds.includes(id));
+
+                    // Determine badge color based on conditions
+                    const getBadgeColor = () => {
+                      if (!hasSplitEntries) return "warning";    // yellow for no splits (or only owner)
+                      if (isFullyPaid) return "success";         // green when all non-owners have paid
+                      return "info";                             // blue for split but not fully paid
+                    };
 
                     return (
                       <tr 
@@ -1489,15 +1294,10 @@ const ReceiptPage = () => {
                         <td>
                           <div className="d-flex align-items-center gap-2">
                             {item.name}
-                            {isPaid && (
-                              <Badge bg="success" className="ms-2">
-                                PAID
-                              </Badge>
-                            )}
                           </div>
                         </td>
                         <td className="text-end">
-                          <Badge bg="info">
+                          <Badge bg={getBadgeColor()}>
                             RM <CountUp 
                               end={item.price} 
                               decimals={2}
@@ -1589,7 +1389,6 @@ const ReceiptPage = () => {
               users={group.members} 
               items={receipt.items} 
               receipt={receipt}
-              receiptId={receiptId}
             />
           </div>
         </Tab>
@@ -1694,7 +1493,9 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     handleAutoSave(newItem);
   };
 
-  const handleUsersChange = (userIds) => {
+  const handleUsersChange = (selectedOptions) => {
+    // Extract user IDs from the selected options
+    const userIds = selectedOptions ? selectedOptions.map(option => option.id) : [];
     const newItem = { ...item, userIds };
     setItem(newItem);
     handleAutoSave(newItem);
@@ -1723,22 +1524,12 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
     }
   };
 
-  // Get filtered users for Paid By select based on Consumed By selection
-  const getPaidByOptions = () => {
-    return users.filter(user => item.userIds.includes(user.id));
-  };
-
   return (
     <Modal show={show} onHide={onHide} centered>
       <Modal.Header closeButton>
-        <Modal.Title>Edit Item</Modal.Title>
+        <Modal.Title>{item.id ? 'Edit Item' : 'Add Item'}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        {initialData?.timestamp && (
-          <div className="text-muted mb-3">
-            Last Updated: {formatDate(initialData.timestamp)}
-          </div>
-        )}
         <Form>
           <Form.Group className="mb-3">
             <Form.Label>Item Name</Form.Label>
@@ -1751,59 +1542,44 @@ const EditItemModal = ({ show, onHide, onSubmit, initialData, users }) => {
             />
           </Form.Group>
 
-          <div className="row g-3 mb-3">
-            <div className="col-8">
-              <Form.Label>Price (RM)</Form.Label>
-              <Form.Control
-                type="number"
-                value={item.price}
-                onChange={(e) => handleFieldChange('price', e.target.value)}
-                step="0.01"
-                min="0"
-                placeholder="Enter price"
-                required
-              />
-            </div>
-            <div className="col-4">
-              <Form.Label>Qty</Form.Label>
-              <Form.Control
-                type="number"
-                value={item.quantity}
-                onChange={(e) => handleFieldChange('quantity', e.target.value)}
-                min="1"
-                placeholder="Qty"
-                required
-              />
-            </div>
-          </div>
+          <Form.Group className="mb-3">
+            <Form.Label>Price (RM)</Form.Label>
+            <Form.Control
+              type="number"
+              step="0.01"
+              value={item.price}
+              onChange={(e) => handleFieldChange('price', parseFloat(e.target.value))}
+              placeholder="Enter price"
+              required
+            />
+          </Form.Group>
 
           <Form.Group className="mb-3">
-            <UserSelect
-              label="Consumed By"
-              value={item.userIds}
-              onChange={(userIds) => {
-                // When Consumed By changes, filter out any Paid By users that are no longer consumers
-                const newPaidByIds = item.paidByIds.filter(id => userIds.includes(id));
-                const newItem = { 
-                  ...item, 
-                  userIds,
-                  paidByIds: newPaidByIds
-                };
-                setItem(newItem);
-                handleAutoSave(newItem);
-              }}
-              options={users}
+            <Form.Label>Quantity</Form.Label>
+            <Form.Control
+              type="number"
+              value={item.quantity}
+              onChange={(e) => handleFieldChange('quantity', parseInt(e.target.value))}
+              placeholder="Enter quantity"
+              required
             />
           </Form.Group>
+
           <Form.Group className="mb-3">
-            <UserSelect
-              label="Paid By"
-              value={item.paidByIds}
-              onChange={handlePaidByChange}
-              options={getPaidByOptions()}  // Only show users selected in Consumed By
-              disabled={item.userIds.length === 0}  // Disable if no consumers selected
+            <Form.Label>Split Among</Form.Label>
+            <Select
+              isMulti
+              value={users.filter(user => item.userIds?.includes(user.id))}
+              onChange={handleUsersChange}
+              options={users}
+              getOptionLabel={user => user.name}
+              getOptionValue={user => user.id}
+              placeholder="Select users to split this item"
+              className="basic-multi-select"
+              classNamePrefix="select"
             />
           </Form.Group>
+
           <div className="d-flex justify-content-end gap-2">
             <Button 
               variant="outline-danger" 
