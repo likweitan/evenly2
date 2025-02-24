@@ -32,6 +32,7 @@ import {
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
 import CountUp from 'react-countup';
+import AttachmentsTab from './components/AttachmentsTab';
 
 const styles = {
   container: {
@@ -1582,7 +1583,7 @@ const ReceiptPage = () => {
           </div>
         </Tab>
 
-        <Tab eventKey="summary" title="Summary">
+        <Tab eventKey="summary" title="Users">
           <div className="pt-3">
             <UserSummary 
               users={group.members} 
@@ -1601,6 +1602,10 @@ const ReceiptPage = () => {
             calculateTaxes={calculateTaxes}
             calculateSubtotal={calculateSubtotal}
           />
+        </Tab>
+
+        <Tab eventKey="attachments" title="Receipt">
+          <AttachmentsTab receiptId={receiptId} />
         </Tab>
       </Tabs>
 

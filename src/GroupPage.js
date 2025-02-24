@@ -751,6 +751,39 @@ const calculateUserTotalAmount = (userId, receipts) => {
   return totalAmount;
 };
 
+// First, add a copy function helper
+const copyToClipboard = (text) => {
+  navigator.clipboard.writeText(text).then(() => {
+    // Could add a toast notification here
+  });
+};
+
+// Add this function at the top level
+const addToRecentGroups = (groupId, groupName) => {
+  try {
+    // Get existing recent groups
+    const recentGroups = JSON.parse(localStorage.getItem('recentGroups') || '[]');
+    
+    // Remove if already exists (to move it to top)
+    const filteredGroups = recentGroups.filter(group => group.id !== groupId);
+    
+    // Add to beginning of array
+    filteredGroups.unshift({
+      id: groupId,
+      name: groupName,
+      lastVisited: new Date().toISOString()
+    });
+
+    // Keep only last 10 groups
+    const updatedGroups = filteredGroups.slice(0, 10);
+    
+    // Save back to localStorage
+    localStorage.setItem('recentGroups', JSON.stringify(updatedGroups));
+  } catch (error) {
+    console.error('Failed to save recent group:', error);
+  }
+};
+
 const GroupPage = () => {
   const navigate = useNavigate();
   const { groupId } = useParams();
@@ -775,6 +808,8 @@ const GroupPage = () => {
           return;
         }
         setGroup(groupData);
+        // Add to recent groups when data is loaded
+        addToRecentGroups(groupId, groupData.name);
       } catch (error) {
         console.error('Failed to fetch group:', error);
         setError(true);
@@ -976,8 +1011,21 @@ const GroupPage = () => {
 
   return (
     <Container className="py-4">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2 className="mb-0">{group?.name || 'Loading...'}</h2>
+      <div className="d-flex justify-content-between align-items-start mb-4">
+    <div>
+          <h2 className="mb-2">{group?.name || 'Loading...'}</h2>
+          <div className="d-flex align-items-center gap-2">
+            <code className="text-muted">{groupId}</code>
+            <Button 
+              variant="outline-secondary" 
+              size="sm"
+              onClick={() => copyToClipboard(groupId)}
+              title="Copy Group ID"
+            >
+              <i className="bi bi-clipboard"></i>
+            </Button>
+          </div>
+        </div>
         <div className="d-flex gap-2">
           <Button variant="primary" onClick={() => setIsShareModalOpen(true)}>
             <i className="bi bi-share"></i>

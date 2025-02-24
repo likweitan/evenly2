@@ -5,6 +5,7 @@ import GroupPage from './GroupPage';
 import ReceiptPage from './ReceiptPage';
 import AppNavbar from './components/Navbar';
 import AuthWrapper from './components/AuthWrapper';
+import CookieNotice from './components/CookieNotice';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
           showUserModal={showUserModal} 
           setShowUserModal={setShowUserModal} 
         />
+        <CookieNotice />
         <AuthWrapper setShowUserModal={setShowUserModal}>
           <Routes>
             <Route path="/" element={<HomePage />} />

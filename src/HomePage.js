@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Container, Card, Button, Form, Modal } from 'react-bootstrap';
+import { Container, Card, Button, Form, Modal, Row } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { createGroup } from './firebaseUtils';
+import RecentGroups from './components/RecentGroups';
 
 const HomePage = () => {
   const [showModal, setShowModal] = useState(false);
   const [groupName, setGroupName] = useState('');
   const navigate = useNavigate();
+  const recentGroups = JSON.parse(localStorage.getItem('recentGroups') || '[]');
 
   const handleCreateGroup = async (e) => {
     e.preventDefault();
@@ -20,20 +22,36 @@ const HomePage = () => {
   };
 
   return (
-    <Container>
-      <Card className="shadow-sm">
-        <Card.Body className="text-center py-5">
-          <h1 className="mb-4">Welcome to Split Bill</h1>
-          <p className="mb-4">Create a new group to start splitting bills with friends</p>
+    <Container className="py-4">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h1 className="mb-0">Receipt Sharing</h1>
+        {recentGroups.length > 0 && (
           <Button 
-            variant="primary" 
-            size="lg"
+            variant="success"
             onClick={() => setShowModal(true)}
           >
-            Create New Group
+            <i className="bi bi-plus-lg"></i>
           </Button>
-        </Card.Body>
-      </Card>
+        )}
+      </div>
+      
+      <RecentGroups />
+
+      {recentGroups.length === 0 && (
+        <Card className="shadow-sm">
+          <Card.Body className="text-center py-5">
+            <h2 className="mb-4">Welcome to Receipt Sharing</h2>
+            <p className="mb-4">Create a new group to start splitting bills with friends</p>
+            <Button 
+              variant="primary" 
+              size="lg"
+              onClick={() => setShowModal(true)}
+            >
+              Create New Group
+            </Button>
+          </Card.Body>
+        </Card>
+      )}
 
       <Modal show={showModal} onHide={() => setShowModal(false)} centered>
         <Modal.Header closeButton>
