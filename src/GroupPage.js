@@ -18,6 +18,7 @@ import {
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
+import CountUp from 'react-countup';
 
 const styles = {
   container: {
@@ -491,6 +492,83 @@ const UploadReceiptModal = ({ show, onHide, onSubmit }) => {
   );
 };
 
+const calculateReceiptTotal = (receipt) => {
+  // Calculate subtotal
+  const subtotal = receipt.items?.reduce((total, item) => 
+    total + (item.price * item.quantity), 0) || 0;
+  
+  let total = subtotal;
+
+  // Add SST if exists
+  if (receipt.sst) {
+    total += subtotal * (receipt.sst / 100);
+  }
+
+  // Add service charge if exists
+  if (receipt.serviceCharge) {
+    total += subtotal * (receipt.serviceCharge / 100);
+  }
+
+  return total;
+};
+
+const calculateGroupInsights = (receipts, members) => {
+  const insights = {
+    totalAmount: 0,
+    receiptCount: receipts.length,
+    recentActivity: receipts[0]?.createdAt,
+    memberCount: members?.length || 0,
+    highestReceipt: {
+      name: '',
+      amount: 0
+    }
+  };
+
+  receipts.forEach(receipt => {
+    const total = calculateReceiptTotal(receipt);
+    insights.totalAmount += total;
+
+    if (total > insights.highestReceipt.amount) {
+      insights.highestReceipt = {
+        name: receipt.name,
+        amount: total
+      };
+    }
+  });
+
+  return insights;
+};
+
+// Add this function to calculate paid bills percentage
+const calculatePaidPercentage = (receipts) => {
+  if (!receipts.length) return 0;
+  
+  let totalPaidItems = 0;
+  let totalItems = 0;
+
+  receipts.forEach(receipt => {
+    if (!receipt.items) return;
+    
+    receipt.items.forEach(item => {
+      totalItems++;
+      // Check if all consumers (except owner) have paid
+      const consumersExcludingOwner = (item.userIds || [])
+        .filter(id => id !== receipt.paidTo);
+      const payersExcludingOwner = (item.paidByIds || [])
+        .filter(id => id !== receipt.paidTo);
+      
+      if (consumersExcludingOwner.length > 0 && 
+          payersExcludingOwner.length > 0 && 
+          consumersExcludingOwner.length === payersExcludingOwner.length && 
+          consumersExcludingOwner.every(id => payersExcludingOwner.includes(id))) {
+        totalPaidItems++;
+      }
+    });
+  });
+
+  return totalItems ? (totalPaidItems / totalItems) * 100 : 0;
+};
+
 const GroupPage = () => {
   const navigate = useNavigate();
   const { groupId } = useParams();
@@ -597,25 +675,6 @@ const GroupPage = () => {
     }
   };
 
-  const calculateReceiptTotal = (receipt) => {
-    // Calculate subtotal
-    const subtotal = receipt.items?.reduce((total, item) => total + (item.price * item.quantity), 0) || 0;
-    
-    let total = subtotal;
-
-    // Add SST if exists
-    if (receipt.sst) {
-      total += subtotal * (receipt.sst / 100);
-    }
-
-    // Add service charge if exists
-    if (receipt.serviceCharge) {
-      total += subtotal * (receipt.serviceCharge / 100);
-    }
-
-    return total;
-  };
-
   const handleDeleteReceipt = async (receiptId, event) => {
     event.stopPropagation();
     
@@ -698,6 +757,63 @@ const GroupPage = () => {
         </div>
       </div>
 
+      <div className="row g-3 mb-4">
+        <div className="col-md-6">
+          <Card className="h-100 shadow-sm">
+            <Card.Body>
+              <div className="d-flex align-items-center mb-2">
+                <i className="bi bi-cash text-success me-2"></i>
+                <h6 className="mb-0">Total Spent</h6>
+              </div>
+              <h3 className="mb-0">
+                RM <CountUp
+                  end={calculateGroupInsights(receipts, group.members).totalAmount}
+                  decimals={2}
+                  duration={1}
+                />
+              </h3>
+            </Card.Body>
+          </Card>
+        </div>
+
+        <div className="col-md-6">
+          <Card className="h-100 shadow-sm">
+            <Card.Body>
+              <div className="d-flex align-items-center mb-2">
+                <i className="bi bi-check-circle text-success me-2"></i>
+                <h6 className="mb-0">Paid Items</h6>
+              </div>
+              <h3 className="mb-0">
+                <CountUp
+                  end={calculatePaidPercentage(receipts)}
+                  decimals={1}
+                  duration={1}
+                  suffix="%"
+                />
+              </h3>
+              <div className="mt-2">
+                <div className="progress" style={{ height: '8px' }}>
+                  <div 
+                    className="progress-bar bg-success" 
+                    role="progressbar" 
+                    style={{ 
+                      width: `${calculatePaidPercentage(receipts)}%`,
+                      transition: 'width 1s ease-in-out'
+                    }} 
+                    aria-valuenow={calculatePaidPercentage(receipts)} 
+                    aria-valuemin="0" 
+                    aria-valuemax="100"
+                  />
+                </div>
+              </div>
+              <small className="text-muted d-block mt-2">
+                of all items have been paid
+              </small>
+            </Card.Body>
+          </Card>
+        </div>
+      </div>
+
       <Tabs
         activeKey={activeTab}
         onSelect={(k) => setActiveTab(k)}
@@ -719,40 +835,43 @@ const GroupPage = () => {
               <tr>
                 <th>Receipt Name</th>
                 <th>Total Amount</th>
-                <th>Created At</th>
-                <th>Actions</th>
+                <th>Paid To</th>
               </tr>
             </thead>
             <tbody>
               {receipts.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="text-center">No receipts</td>
+                  <td colSpan="3" className="text-center">No receipts</td>
                 </tr>
               ) : (
-                receipts.map((receipt) => (
-                  <tr 
-                    key={receipt.id} 
-                    onClick={() => handleReceiptClick(receipt.id)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <td>{receipt.name}</td>
-                    <td>
-                      <Badge bg="info">
-                        RM {calculateReceiptTotal(receipt).toFixed(2)}
-                      </Badge>
-                    </td>
-                    <td>{new Date(receipt.createdAt).toLocaleString()}</td>
-                    <td>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={(e) => handleDeleteReceipt(receipt.id, e)}
-                      >
-                        Delete
-                      </Button>
-                    </td>
-                  </tr>
-                ))
+                receipts.map((receipt) => {
+                  // Find the user name for paidTo
+                  const paidToUser = group.members?.find(member => member.id === receipt.paidTo);
+                  
+                  return (
+                    <tr 
+                      key={receipt.id} 
+                      onClick={() => handleReceiptClick(receipt.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{receipt.name}</td>
+                      <td>
+                        <Badge bg="info">
+                          RM {calculateReceiptTotal(receipt).toFixed(2)}
+                        </Badge>
+                      </td>
+                      <td>
+                        {paidToUser ? (
+                          <Badge bg="primary">
+                            {paidToUser.name}
+                          </Badge>
+                        ) : (
+                          <Badge bg="secondary">Unassigned</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </Table>

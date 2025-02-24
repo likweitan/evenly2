@@ -70,7 +70,7 @@ const AppNavbar = () => {
         <Navbar.Collapse id="basic-navbar-nav" className="justify-content-end">
           <Nav>
             <Nav.Link 
-              href="https://github.com/likweitan/evenly2/tree/main" 
+              href="https://github.com/likweitan/evenly" 
               target="_blank" 
               rel="noopener noreferrer"
               className="d-flex align-items-center"

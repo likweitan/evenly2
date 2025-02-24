@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { db } from './firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { 
@@ -10,7 +10,8 @@ import {
   deleteReceiptItem,
   updateReceiptTaxes,
   updateReceiptItem,
-  updateReceiptSettings
+  updateReceiptSettings,
+  deleteReceipt
 } from './firebaseUtils';
 import { 
   Container, 
@@ -24,7 +25,8 @@ import {
   Col,
   Breadcrumb,
   Tab,
-  Tabs
+  Tabs,
+  Alert
 } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -731,13 +733,15 @@ const UserSummary = ({ users, items, receipt }) => {
   );
 };
 
-const ReceiptSettingsModal = ({ show, onHide, onSubmit, initialData, users }) => {
+const ReceiptSettingsModal = ({ show, onHide, onSubmit, onDelete, initialData, users }) => {
   const [settings, setSettings] = useState({
     name: '',
     paidTo: '',
     sst: '',
     serviceCharge: ''
   });
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -755,88 +759,124 @@ const ReceiptSettingsModal = ({ show, onHide, onSubmit, initialData, users }) =>
     onSubmit(settings);
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setSettings(prev => ({
-      ...prev,
-      [name]: value
-    }));
+  const handleDelete = () => {
+    setShowDeleteConfirm(false);
+    onDelete();
   };
 
   return (
-    <Modal show={show} onHide={onHide} centered>
-      <Modal.Header closeButton>
-        <Modal.Title>Receipt Settings</Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
-        <Form onSubmit={handleSubmit}>
-          <Form.Group className="mb-3">
-            <Form.Label>Receipt Name</Form.Label>
-            <Form.Control
-              type="text"
-              name="name"
-              value={settings.name}
-              onChange={handleChange}
-              required
-            />
-          </Form.Group>
+    <>
+      <Modal show={show} onHide={onHide} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Receipt Settings</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form onSubmit={handleSubmit}>
+            <Form.Group className="mb-3">
+              <Form.Label>Receipt Name</Form.Label>
+              <Form.Control
+                type="text"
+                name="name"
+                value={settings.name}
+                onChange={(e) => setSettings(prev => ({ ...prev, name: e.target.value }))}
+                required
+              />
+            </Form.Group>
 
-          <Form.Group className="mb-3">
-            <Form.Label>Paid To</Form.Label>
-            <Form.Select
-              name="paidTo"
-              value={settings.paidTo}
-              onChange={handleChange}
-              required
-            >
-              <option value="">Select user</option>
-              {users?.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name}
-                </option>
-              ))}
-            </Form.Select>
-          </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Paid To</Form.Label>
+              <Form.Select
+                name="paidTo"
+                value={settings.paidTo}
+                onChange={(e) => setSettings(prev => ({ ...prev, paidTo: e.target.value }))}
+                required
+              >
+                <option value="">Select user</option>
+                {users?.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name}
+                  </option>
+                ))}
+              </Form.Select>
+            </Form.Group>
 
-          <hr className="my-4" />
+            <hr className="my-4" />
 
-          <Form.Group className="mb-3">
-            <Form.Label>SST (%)</Form.Label>
-            <Form.Control
-              type="number"
-              name="sst"
-              value={settings.sst}
-              onChange={handleChange}
-              step="0.1"
-              min="0"
-              max="100"
-            />
-          </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>SST (%)</Form.Label>
+              <Form.Control
+                type="number"
+                name="sst"
+                value={settings.sst}
+                onChange={(e) => setSettings(prev => ({ ...prev, sst: e.target.value }))}
+                step="0.1"
+                min="0"
+                max="100"
+              />
+            </Form.Group>
 
-          <Form.Group className="mb-3">
-            <Form.Label>Service Charge (%)</Form.Label>
-            <Form.Control
-              type="number"
-              name="serviceCharge"
-              value={settings.serviceCharge}
-              onChange={handleChange}
-              step="0.1"
-              min="0"
-              max="100"
-            />
-          </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Service Charge (%)</Form.Label>
+              <Form.Control
+                type="number"
+                name="serviceCharge"
+                value={settings.serviceCharge}
+                onChange={(e) => setSettings(prev => ({ ...prev, serviceCharge: e.target.value }))}
+                step="0.1"
+                min="0"
+                max="100"
+              />
+            </Form.Group>
 
-          <div className="d-flex justify-content-end gap-2">
-            <Button variant="secondary" onClick={onHide}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit">
-              Save Changes
-            </Button>
-          </div>
-        </Form>
-      </Modal.Body>
-    </Modal>
+            <div className="d-flex justify-content-between">
+              <Button 
+                variant="outline-danger" 
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                <i className="bi bi-trash me-2"></i>
+                Delete Receipt
+              </Button>
+              <Button variant="primary" type="submit">
+                Save Changes
+              </Button>
+            </div>
+          </Form>
+        </Modal.Body>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        show={showDeleteConfirm}
+        onHide={() => setShowDeleteConfirm(false)}
+        centered
+      >
+        <Modal.Header closeButton>
+          <Modal.Title className="text-danger">Delete Receipt</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p>Are you sure you want to delete this receipt?</p>
+          <Alert variant="danger">
+            <i className="bi bi-exclamation-triangle-fill me-2"></i>
+            This action cannot be undone. All items and data in this receipt will be permanently deleted.
+          </Alert>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button 
+            variant="secondary" 
+            onClick={() => setShowDeleteConfirm(false)}
+          >
+            Cancel
+          </Button>
+          <Button 
+            variant="danger" 
+            onClick={handleDelete}
+          >
+            Delete Receipt
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </>
   );
 };
 
@@ -851,6 +891,29 @@ const formatDate = (dateString) => {
   });
 };
 
+const calculateReceiptPaidPercentage = (receipt) => {
+  if (!receipt.items || !receipt.items.length) return 0;
+  
+  let totalPaidItems = 0;
+  let totalItems = receipt.items.length;
+
+  receipt.items.forEach(item => {
+    const consumersExcludingOwner = (item.userIds || [])
+      .filter(id => id !== receipt.paidTo);
+    const payersExcludingOwner = (item.paidByIds || [])
+      .filter(id => id !== receipt.paidTo);
+    
+    if (consumersExcludingOwner.length > 0 && 
+        payersExcludingOwner.length > 0 && 
+        consumersExcludingOwner.length === payersExcludingOwner.length && 
+        consumersExcludingOwner.every(id => payersExcludingOwner.includes(id))) {
+      totalPaidItems++;
+    }
+  });
+
+  return (totalPaidItems / totalItems) * 100;
+};
+
 const ReceiptPage = () => {
   const { groupId, receiptId } = useParams();
   const [receipt, setReceipt] = useState(null);
@@ -863,6 +926,7 @@ const ReceiptPage = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [activeTab, setActiveTab] = useState('items');
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1003,6 +1067,16 @@ const ReceiptPage = () => {
     }
   };
 
+  const handleDeleteReceipt = async () => {
+    try {
+      await deleteReceipt(groupId, receiptId);
+      navigate(`/group/${groupId}`);
+    } catch (error) {
+      console.error('Failed to delete receipt:', error);
+      alert('Failed to delete receipt');
+    }
+  };
+
   if (!receipt || !group) {
     return <LoadingSpinner />;
   }
@@ -1035,8 +1109,29 @@ const ReceiptPage = () => {
       <div className="d-flex justify-content-between align-items-start mb-4">
         <div>
           <h2 className="mb-2">{receipt.name}</h2>
-          <div className="text-muted">
+          <div className="text-muted mb-2">
             Created: {formatDate(receipt.createdAt)}
+          </div>
+          <div style={{ width: '200px' }}>
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <small className="text-muted">Payment Progress</small>
+              <small className="text-success">
+                {calculateReceiptPaidPercentage(receipt).toFixed(1)}%
+              </small>
+            </div>
+            <div className="progress" style={{ height: '6px' }}>
+              <div 
+                className="progress-bar bg-success" 
+                role="progressbar" 
+                style={{ 
+                  width: `${calculateReceiptPaidPercentage(receipt)}%`,
+                  transition: 'width 1s ease-in-out'
+                }} 
+                aria-valuenow={calculateReceiptPaidPercentage(receipt)} 
+                aria-valuemin="0" 
+                aria-valuemax="100"
+              />
+            </div>
           </div>
         </div>
         <div className="d-flex gap-2">
@@ -1207,6 +1302,7 @@ const ReceiptPage = () => {
         show={isTaxModalOpen}
         onHide={() => setIsTaxModalOpen(false)}
         onSubmit={handleSettingsUpdate}
+        onDelete={handleDeleteReceipt}
         initialData={{
           name: receipt.name,
           paidTo: receipt.paidTo,
